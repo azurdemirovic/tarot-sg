@@ -1,5 +1,4 @@
 import { Container, Sprite, Graphics } from 'pixi.js';
-import { OutlineFilter } from 'pixi-filters';
 import { AssetLoader } from '../AssetLoader';
 
 export class ReelSpinner extends Container {
@@ -163,9 +162,6 @@ export class ReelSpinner extends Container {
     });
   }
 
-  // Shared outline filter instance for all normal symbols
-  private static outlineFilter = new OutlineFilter({ thickness: 2, color: 0x000000 });
-
   private rebuildStrip(symbolIds: string[]): void {
     this.strip.forEach(s => s.destroy());
     this.strip = [];
@@ -180,11 +176,6 @@ export class ReelSpinner extends Container {
       sprite.width = this.cellSize - 20;
       sprite.height = this.cellSize - 20;
       sprite.x = this.cellSize / 2;
-      
-      // Black outline for normal symbols only (not tarots)
-      if (!symbolId.startsWith('T_')) {
-        sprite.filters = [ReelSpinner.outlineFilter];
-      }
       
       this.symbolContainer.addChild(sprite);
       this.strip.push(sprite);

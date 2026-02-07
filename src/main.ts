@@ -18,10 +18,7 @@ let canSkip: boolean = false;
 const spinBtn = document.getElementById('spin-btn') as HTMLButtonElement;
 const balanceDisplay = document.getElementById('balance-display') as HTMLElement;
 const winDisplay = document.getElementById('win-display') as HTMLElement;
-const debugSeed = document.getElementById('debug-seed') as HTMLElement;
-const debugMode = document.getElementById('debug-mode') as HTMLElement;
-const debugResult = document.getElementById('debug-result') as HTMLElement;
-const debugTarots = document.getElementById('debug-tarots') as HTMLElement;
+const winPanel = document.getElementById('win-panel') as HTMLElement;
 
 async function init() {
   try {
@@ -31,7 +28,7 @@ async function init() {
     await app.init({
       width: 1040,
       height: 720,
-      backgroundColor: 0xffffff,
+      backgroundColor: 0x000000,
       antialias: true,
     });
 
@@ -82,8 +79,6 @@ async function init() {
 
     console.log('✅ Placeholder shown');
 
-    // Update debug display
-    updateDebugDisplay();
     updateUI();
 
     // Enable spin button
@@ -144,6 +139,7 @@ async function handleSpin() {
   currentState = SpinState.SPINNING;
   spinBtn.disabled = true; // Lock button immediately
   paylineOverlay.clear();
+  winPanel.classList.remove('visible');
   canSkip = false;
 
   const { grid, tarotColumns, wins, totalWin } = gameController.spin();
@@ -178,7 +174,6 @@ async function showResults() {
   }
   
   updateUI();
-  updateDebugDisplay();
   
   if (currentSpinData) {
     console.log('Grid:', currentSpinData.grid);
@@ -192,36 +187,15 @@ async function showResults() {
 
 function updateUI() {
   balanceDisplay.textContent = gameController.balance.toFixed(2) + ' €';
-  winDisplay.textContent = gameController.lastWin.toFixed(2) + ' €';
   
-  // Flash win if > 0
   if (gameController.lastWin > 0) {
-    winDisplay.style.color = '#00aa44';
-    setTimeout(() => {
-      winDisplay.style.color = '#333';
-    }, 500);
+    winDisplay.textContent = gameController.lastWin.toFixed(2) + ' €';
+    winPanel.classList.add('visible');
+  } else {
+    winPanel.classList.remove('visible');
   }
 }
 
-function updateDebugDisplay() {
-  debugSeed.textContent = gameController.getSeed().toString();
-  debugMode.textContent = gameController.getMode();
-  
-  const grid = gameController.getCurrentGrid();
-  if (grid) {
-    const symbolCounts = new Map<string, number>();
-    for (const col of grid) {
-      for (const cell of col) {
-        symbolCounts.set(cell.symbolId, (symbolCounts.get(cell.symbolId) || 0) + 1);
-      }
-    }
-    const topSymbol = Array.from(symbolCounts.entries())
-      .sort((a, b) => b[1] - a[1])[0];
-    debugResult.textContent = topSymbol ? `${topSymbol[0]} x${topSymbol[1]}` : '-';
-  }
-
-  debugTarots.textContent = gameController.formatTarotsDebug();
-}
 
 // Start the game
 init().catch(console.error);

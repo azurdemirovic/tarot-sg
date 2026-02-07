@@ -8,6 +8,7 @@ export class GridView extends Container {
   private padding: number = 10;
   private sprites: Sprite[][] = [];
   private frameSprite: Sprite | null = null;
+  private bgPlaceholder: Graphics | null = null;
   private reelSpinners: ReelSpinner[] = [];
   private isAnimating: boolean = false;
 
@@ -18,6 +19,7 @@ export class GridView extends Container {
   ) {
     super();
     this.initializeGrid();
+    this.loadBackground();
     this.loadFrame();
   }
 
@@ -49,15 +51,41 @@ export class GridView extends Container {
     }
   }
 
+  private async loadBackground(): Promise<void> {
+    const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
+    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+    
+    try {
+      const bgTexture = await Assets.load('/assets/symbols/BACKGROUND.jpg');
+      const bgSprite = new Sprite(bgTexture);
+      bgSprite.width = totalWidth;
+      bgSprite.height = totalHeight;
+      this.addChildAt(bgSprite, 0); // behind everything
+      // Remove the white placeholder now that real bg is in place
+      if (this.bgPlaceholder) {
+        this.removeChild(this.bgPlaceholder);
+        this.bgPlaceholder.destroy();
+        this.bgPlaceholder = null;
+      }
+      console.log('✅ Background loaded');
+    } catch (error) {
+      console.warn('Background image not found, using white fallback:', error);
+      const bg = new Graphics();
+      bg.rect(0, 0, totalWidth, totalHeight);
+      bg.fill({ color: 0xffffff, alpha: 1.0 });
+      this.addChildAt(bg, 0);
+    }
+  }
+
   private initializeGrid(): void {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
     
-    // White background
-    const bg = new Graphics();
-    bg.rect(0, 0, totalWidth, totalHeight);
-    bg.fill({ color: 0xffffff, alpha: 1.0 });
-    this.addChild(bg);
+    // Placeholder white bg (replaced once BACKGROUND.jpg loads)
+    this.bgPlaceholder = new Graphics();
+    this.bgPlaceholder.rect(0, 0, totalWidth, totalHeight);
+    this.bgPlaceholder.fill({ color: 0xffffff, alpha: 1.0 });
+    this.addChild(this.bgPlaceholder);
 
     // Create reel spinners
     for (let col = 0; col < this.cols; col++) {
