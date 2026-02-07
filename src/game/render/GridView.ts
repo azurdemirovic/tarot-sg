@@ -30,10 +30,16 @@ export class GridView extends Container {
       const frameTexture = await Assets.load('/assets/symbols/frame.png');
       this.frameSprite = new Sprite(frameTexture);
       
-      // Scale frame to be larger than grid
-      this.frameSprite.width = (totalWidth + 166) * 1.01;
-      this.frameSprite.height = (totalHeight + 166) * 1.01;
-      this.frameSprite.position.set(-81, -81);
+      // Scale frame to be larger than grid, centered
+      const borderX = 83;
+      const borderY = 83;
+      const scale = 1.01;
+      this.frameSprite.width = (totalWidth + borderX * 2) * scale;
+      this.frameSprite.height = (totalHeight + borderY * 2) * scale;
+      // Center: offset by border + half of the extra from scaling
+      const extraW = (totalWidth + borderX * 2) * (scale - 1) / 2;
+      const extraH = (totalHeight + borderY * 2) * (scale - 1) / 2;
+      this.frameSprite.position.set(-borderX - extraW, -borderY - extraH);
       
       // Add frame on top of everything
       this.addChild(this.frameSprite);
@@ -55,7 +61,7 @@ export class GridView extends Container {
 
     // Create reel spinners
     for (let col = 0; col < this.cols; col++) {
-      const reelSpinner = new ReelSpinner(this.assetLoader, this.cellSize, this.rows);
+      const reelSpinner = new ReelSpinner(this.assetLoader, this.cellSize, this.rows, this.padding);
       reelSpinner.position.set(col * (this.cellSize + this.padding), 0);
       this.addChild(reelSpinner);
       this.reelSpinners.push(reelSpinner);

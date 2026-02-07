@@ -1,4 +1,5 @@
 import { Container, Sprite, Graphics } from 'pixi.js';
+import { OutlineFilter } from 'pixi-filters';
 import { AssetLoader } from '../AssetLoader';
 
 export class ReelSpinner extends Container {
@@ -18,20 +19,28 @@ export class ReelSpinner extends Container {
   private bounceVelocity: number = 0;
   private bounceTime: number = 0;
 
+  private readonly padding: number;
+  private readonly step: number; // cellSize + padding
+
   constructor(
     private assetLoader: AssetLoader,
     cellSize: number,
-    rows: number = 3
+    rows: number = 3,
+    padding: number = 0
   ) {
     super();
     this.cellSize = cellSize;
     this.rows = rows;
+    this.padding = padding;
+    this.step = cellSize + padding;
     
     this.symbolContainer = new Container();
     this.addChild(this.symbolContainer);
     
+    // Mask covers the full grid height including padding between rows
+    const maskHeight = rows * cellSize + (rows - 1) * padding;
     const mask = new Graphics();
-    mask.rect(0, 0, cellSize, rows * cellSize);
+    mask.rect(0, 0, cellSize, maskHeight);
     mask.fill({ color: 0xffffff });
     this.addChild(mask);
     this.symbolContainer.mask = mask;
@@ -66,7 +75,7 @@ export class ReelSpinner extends Container {
     const stripSymbols = [...finalSymbols, ...fillerSymbols];
     
     this.rebuildStrip(stripSymbols);
-    this.scrollOffset = -fillerCount * this.cellSize; // Start showing filler
+    this.scrollOffset = -fillerCount * this.step; // Start showing filler
     this.targetOffset = 0; // End showing final symbols
     
     this.updateStripPositions();
@@ -149,17 +158,20 @@ export class ReelSpinner extends Container {
 
   private updateStripPositions(): void {
     this.strip.forEach((sprite, index) => {
-      // Downward scroll: positive scrollOffset moves symbols down
-      sprite.y = (index * this.cellSize + this.scrollOffset + this.bounceOffset) + this.cellSize / 2;
+      // Downward scroll: use step (cellSize + padding) for proper grid alignment
+      sprite.y = (index * this.step + this.scrollOffset + this.bounceOffset) + this.cellSize / 2;
     });
   }
+
+  // Shared outline filter instance for all normal symbols
+  private static outlineFilter = new OutlineFilter({ thickness: 2, color: 0x000000 });
 
   private rebuildStrip(symbolIds: string[]): void {
     this.strip.forEach(s => s.destroy());
     this.strip = [];
     this.symbolContainer.removeChildren();
     
-    symbolIds.forEach((symbolId, index) => {
+    symbolIds.forEach((symbolId) => {
       const sprite = new Sprite();
       const texture = this.assetLoader.getTexture(symbolId);
       if (texture) sprite.texture = texture;
@@ -168,6 +180,11 @@ export class ReelSpinner extends Container {
       sprite.width = this.cellSize - 20;
       sprite.height = this.cellSize - 20;
       sprite.x = this.cellSize / 2;
+      
+      // Black outline for normal symbols only (not tarots)
+      if (!symbolId.startsWith('T_')) {
+        sprite.filters = [ReelSpinner.outlineFilter];
+      }
       
       this.symbolContainer.addChild(sprite);
       this.strip.push(sprite);

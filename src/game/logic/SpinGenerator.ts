@@ -12,7 +12,7 @@ export class SpinGenerator {
    * Generates a spin result for a 5x3 grid
    * @param tarotChance Probability (0-1) of tarots appearing
    */
-  generateSpin(cols: number = 5, rows: number = 3, tarotChance: number = 0.15): { grid: Grid, tarotColumns: TarotColumn[] } {
+  generateSpin(cols: number = 5, rows: number = 3, tarotChance: number = 0 /* disabled for base game */): { grid: Grid, tarotColumns: TarotColumn[] } {
     const grid: Grid = [];
     const tarotColumns: TarotColumn[] = [];
 
