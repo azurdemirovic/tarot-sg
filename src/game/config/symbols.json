@@ -1,0 +1,137 @@
+{
+  "symbols": [
+    {
+      "id": "WILD",
+      "tier": "WILD",
+      "filename": "WILD.png",
+      "baseWeight": 5,
+      "payValues": [0, 0, 20, 100, 500],
+      "isTarot": false
+    },
+    {
+      "id": "COIN",
+      "tier": "LOW",
+      "filename": "COIN.png",
+      "baseWeight": 30,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "CUP",
+      "tier": "LOW",
+      "filename": "CUP.png",
+      "baseWeight": 28,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "KEY",
+      "tier": "LOW",
+      "filename": "KEY.png",
+      "baseWeight": 26,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "SWORD",
+      "tier": "LOW",
+      "filename": "SWORD.png",
+      "baseWeight": 28,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "RING",
+      "tier": "LOW",
+      "filename": "RING.png",
+      "baseWeight": 27,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "FLEUR",
+      "tier": "LOW",
+      "filename": "FLEUR.png",
+      "baseWeight": 29,
+      "payValues": [0, 0, 5, 10, 25],
+      "isTarot": false
+    },
+    {
+      "id": "SKULLCROSS",
+      "tier": "PREMIUM",
+      "filename": "SKULLCROSS.png",
+      "baseWeight": 15,
+      "payValues": [0, 0, 10, 25, 100],
+      "isTarot": false
+    },
+    {
+      "id": "DICE",
+      "tier": "PREMIUM",
+      "filename": "DICE.png",
+      "baseWeight": 12,
+      "payValues": [0, 0, 15, 35, 150],
+      "isTarot": false
+    },
+    {
+      "id": "KING",
+      "tier": "PREMIUM",
+      "filename": "KING.png",
+      "baseWeight": 10,
+      "payValues": [0, 0, 20, 50, 200],
+      "isTarot": false
+    },
+    {
+      "id": "ANGEL",
+      "tier": "PREMIUM",
+      "filename": "ANGEL.png",
+      "baseWeight": 8,
+      "payValues": [0, 0, 25, 75, 300],
+      "isTarot": false
+    },
+    {
+      "id": "T_FOOL",
+      "tier": "TAROT",
+      "filename": "T_FOOL.jpg",
+      "baseWeight": 8,
+      "payValues": [0, 0, 15, 30, 75],
+      "isTarot": true
+    },
+    {
+      "id": "T_CUPS",
+      "tier": "TAROT",
+      "filename": "T_CUPS.jpg",
+      "baseWeight": 8,
+      "payValues": [0, 0, 15, 30, 75],
+      "isTarot": true
+    },
+    {
+      "id": "T_LOVERS",
+      "tier": "TAROT",
+      "filename": "T_LOVERS.jpg",
+      "baseWeight": 5,
+      "payValues": [0, 0, 20, 40, 100],
+      "isTarot": true
+    },
+    {
+      "id": "T_PRIESTESS",
+      "tier": "TAROT",
+      "filename": "T_PRIESTESS.jpg",
+      "baseWeight": 3,
+      "payValues": [0, 0, 30, 60, 150],
+      "isTarot": true
+    },
+    {
+      "id": "T_DEATH",
+      "tier": "TAROT",
+      "filename": "T_DEATH.jpg",
+      "baseWeight": 3,
+      "payValues": [0, 0, 30, 60, 150],
+      "isTarot": true
+    }
+  ],
+  "pools": {
+    "LOW": ["COIN", "CUP", "KEY", "SWORD", "RING", "FLEUR"],
+    "PREMIUM": ["SKULLCROSS", "DICE", "KING", "ANGEL"],
+    "TAROT": ["T_FOOL", "T_CUPS", "T_LOVERS", "T_PRIESTESS", "T_DEATH"]
+  }
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tarot Slot Game</title>
+    <style>
+      @font-face {
+        font-family: 'CustomFont';
+        src: url('/fonts/font.TTF') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: 'CustomFont', 'Arial', sans-serif;
+        background: #ffffff;
+        color: #333;
+        overflow: hidden;
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+      }
+
+      #app {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #game-container {
+        position: relative;
+        display: block;
+        margin-bottom: 20px;
+      }
+
+      canvas {
+        display: block;
+        background: transparent;
+      }
+
+      #ui-overlay {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        max-width: 1040px;
+      }
+
+      #controls {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+
+      #spin-btn {
+        background-image: url('/assets/symbols/button.png');
+        background-size: 100% 100%;
+        background-repeat: no-repeat;
+        background-position: center;
+        border: none;
+        color: #fff;
+        font-family: 'CustomFont', 'Arial', sans-serif;
+        font-size: 24px;
+        font-weight: bold;
+        padding: 20px 60px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      }
+
+      #spin-btn:hover:not(:disabled) {
+        transform: translateY(-2px) scale(1.02);
+        filter: brightness(1.1);
+      }
+
+      #spin-btn:active:not(:disabled) {
+        transform: translateY(0) scale(0.98);
+      }
+
+      #spin-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .info-panel {
+        background: #f5f5f5;
+        border: 2px solid #8b4abf;
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-size: 18px;
+        min-width: 150px;
+        text-align: center;
+      }
+
+      .info-label {
+        font-size: 14px;
+        color: #8b4abf;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+      }
+
+      .info-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #333;
+      }
+
+      #debug-panel {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        background: #f5f5f5;
+        border: 2px solid #8b4abf;
+        border-radius: 8px;
+        padding: 16px;
+        font-size: 12px;
+        font-family: 'CustomFont', 'Courier New', monospace;
+        min-width: 200px;
+      }
+
+      #debug-panel h3 {
+        color: #8b4abf;
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+
+      .debug-line {
+        margin: 4px 0;
+        color: #333;
+      }
+
+      .debug-value {
+        color: #8b4abf;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-container">
+        <!-- PixiJS canvas will be inserted here -->
+      </div>
+      
+      <div id="ui-overlay">
+        <div id="controls">
+          <div class="info-panel">
+            <div class="info-label">Balance</div>
+            <div class="info-value" id="balance-display">100.00 €</div>
+          </div>
+          
+          <button id="spin-btn">SPIN</button>
+          
+          <div class="info-panel">
+            <div class="info-label">Win</div>
+            <div class="info-value" id="win-display">0.00 €</div>
+          </div>
+        </div>
+        
+        <div class="info-panel" style="font-size: 14px;">
+          <div class="info-label">Bet</div>
+          <div style="color: #333; font-size: 16px;">0.20 €</div>
+        </div>
+      </div>
+
+      <div id="debug-panel">
+        <h3>🔧 Debug Info</h3>
+        <div class="debug-line">RNG Seed: <span class="debug-value" id="debug-seed">12345</span></div>
+        <div class="debug-line">Mode: <span class="debug-value" id="debug-mode">BASE</span></div>
+        <div class="debug-line">Last Spin: <span class="debug-value" id="debug-result">-</span></div>
+        <div class="debug-line">Tarots: <span class="debug-value" id="debug-tarots">None</span></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
