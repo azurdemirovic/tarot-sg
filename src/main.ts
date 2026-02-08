@@ -3,6 +3,8 @@ import { AssetLoader } from './game/AssetLoader';
 import { GameController, SpinOutput } from './game/GameController';
 import { GridView } from './game/render/GridView';
 import { PaylineOverlay } from './game/render/PaylineOverlay';
+import { ThreeBackground } from './threeBackground';
+import { DEBUG } from './game/config/debug';
 
 // Initialize PixiJS Application
 const app = new Application();
@@ -24,10 +26,11 @@ async function init() {
   try {
     console.log('🎰 Initializing PixiJS...');
     
-    // Initialize PixiJS
+    // Initialize PixiJS (transparent so 3D background shows through)
     await app.init({
       width: 1040,
       height: 720,
+      backgroundAlpha: DEBUG.BG_ENABLED ? 0 : 1,
       backgroundColor: 0x000000,
       antialias: true,
     });
@@ -97,6 +100,19 @@ async function init() {
     app.ticker.add((ticker) => {
       gridView.update(ticker.deltaTime);
     });
+
+    // ── Initialize Three.js 3D background ──
+    if (DEBUG.BG_ENABLED) {
+      const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
+      if (threeCanvas) {
+        new ThreeBackground({
+          canvas: threeCanvas,
+          modelPath: '/assets/3d/free_game_character_-the_ancient_woman_titan.glb',
+          animate: DEBUG.BG_ANIMATE_CAMERA,
+        });
+        console.log('✅ Three.js 3D background initialized');
+      }
+    }
   } catch (error) {
     console.error('❌ Initialization error:', error);
   }
