@@ -1,6 +1,6 @@
 import { Application } from 'pixi.js';
 import { AssetLoader } from './game/AssetLoader';
-import { GameController } from './game/GameController';
+import { GameController, SpinOutput } from './game/GameController';
 import { GridView } from './game/render/GridView';
 import { PaylineOverlay } from './game/render/PaylineOverlay';
 
@@ -37,7 +37,6 @@ async function init() {
     // Add canvas to container
     const gameContainer = document.getElementById('game-container');
     if (gameContainer) {
-      // Clear any existing content
       gameContainer.innerHTML = '';
       gameContainer.appendChild(app.canvas);
       console.log('✅ Canvas added to container');
@@ -103,7 +102,7 @@ async function init() {
   }
 }
 
-// Proper State Machine
+// ── State Machine ──
 enum SpinState {
   IDLE = 'IDLE',
   SPINNING = 'SPINNING',
@@ -112,46 +111,40 @@ enum SpinState {
 }
 
 let currentState: SpinState = SpinState.IDLE;
-let currentSpinData: any = null;
+let currentSpinData: SpinOutput | null = null;
 let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
-const SAFETY_TIMEOUT_MS = 10000; // 10 second safety timeout
+const SAFETY_TIMEOUT_MS = 10000;
 
 function resetState() {
   currentState = SpinState.IDLE;
   canSkip = false;
   spinBtn.disabled = false;
   
-  if (skipEnableTimer) {
-    clearTimeout(skipEnableTimer);
-    skipEnableTimer = null;
-  }
-  if (safetyTimeout) {
-    clearTimeout(safetyTimeout);
-    safetyTimeout = null;
-  }
+  if (skipEnableTimer) { clearTimeout(skipEnableTimer); skipEnableTimer = null; }
+  if (safetyTimeout) { clearTimeout(safetyTimeout); safetyTimeout = null; }
 }
 
 async function handleSpin() {
   // ── HURRY UP: double click speeds up landing ──
   if (currentState === SpinState.SPINNING && canSkip) {
     canSkip = false;
-    spinBtn.disabled = true; // Lock button until spin finishes
-    gridView.hurryUp();     // Speed up remaining reels
-    return;                  // spinToGrid() await in the original call will still resolve
+    spinBtn.disabled = true;
+    gridView.hurryUp();
+    return;
   }
   
   // ── NEW SPIN ──
   if (currentState !== SpinState.IDLE) return;
   
   currentState = SpinState.SPINNING;
-  spinBtn.disabled = true; // Lock button immediately
+  spinBtn.disabled = true;
   paylineOverlay.clear();
   winPanel.classList.remove('visible');
   canSkip = false;
 
-  const { grid, tarotColumns, wins, totalWin } = gameController.spin();
-  currentSpinData = { grid, tarotColumns, wins, totalWin };
+  const spinOutput = gameController.spin();
+  currentSpinData = spinOutput;
 
   // After 0.25s, unlock button for hurry-up
   skipEnableTimer = setTimeout(() => {
@@ -164,9 +157,22 @@ async function handleSpin() {
   safetyTimeout = setTimeout(() => resetState(), SAFETY_TIMEOUT_MS);
 
   try {
-    // This await resolves when ALL reels have stopped + bounced
-    // Whether natural or hurried, the same promise resolves
-    await gridView.spinToGrid(grid, tarotColumns);
+    // ── Phase 1: Spin & land the INITIAL grid (with tarot columns visible) ──
+    await gridView.spinToGrid(spinOutput.initialGrid, spinOutput.tarotColumns);
+
+    // ── Phase 2: If a feature triggered, animate the transformation ──
+    if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
+      // Brief pause so player sees the Fool columns before they transform
+      await delay(800);
+
+      // Swap the Fool columns to show WILDs + PREMIUMs
+      gridView.updateColumns(spinOutput.finalGrid, spinOutput.feature.columns);
+
+      // Another brief pause for the player to see the new symbols
+      await delay(400);
+    }
+
+    // ── Phase 3: Show results ──
     await showResults();
   } catch (error) {
     console.error('❌ Spin error:', error);
@@ -175,21 +181,27 @@ async function handleSpin() {
 }
 
 async function showResults() {
-  if (currentSpinData && currentSpinData.wins.length > 0) {
+  if (!currentSpinData) return;
+
+  if (currentSpinData.wins.length > 0) {
     setTimeout(() => {
-      paylineOverlay.showWinningPaylines(currentSpinData.wins);
+      paylineOverlay.showWinningPaylines(currentSpinData!.wins);
     }, 200);
   }
   
   updateUI();
   
-  if (currentSpinData) {
-    console.log('Grid:', currentSpinData.grid);
-    console.log('Tarots:', currentSpinData.tarotColumns);
-    if (currentSpinData.wins.length > 0) {
-      console.log('💰 Wins:', currentSpinData.wins);
-      console.log(`🎉 Total Win: ${currentSpinData.totalWin} EUR`);
+  console.log('Grid:', currentSpinData.finalGrid);
+  console.log('Tarots:', currentSpinData.tarotColumns);
+  if (currentSpinData.feature) {
+    console.log(`🃏 Feature: ${currentSpinData.feature.type} ×${currentSpinData.feature.count}`);
+  }
+  if (currentSpinData.wins.length > 0) {
+    console.log('💰 Wins:', currentSpinData.wins);
+    if (currentSpinData.multiplier > 1) {
+      console.log(`💫 Multiplier: ×${currentSpinData.multiplier}`);
     }
+    console.log(`🎉 Total Win: ${currentSpinData.totalWin.toFixed(4)} EUR`);
   }
 }
 
@@ -197,13 +209,21 @@ function updateUI() {
   balanceDisplay.textContent = gameController.balance.toFixed(2) + ' €';
   
   if (gameController.lastWin > 0) {
-    winDisplay.textContent = gameController.lastWin.toFixed(2) + ' €';
+    const multiplier = currentSpinData?.multiplier ?? 1;
+    if (multiplier > 1) {
+      winDisplay.textContent = gameController.lastWin.toFixed(2) + ' € (×' + multiplier + ')';
+    } else {
+      winDisplay.textContent = gameController.lastWin.toFixed(2) + ' €';
+    }
     winPanel.classList.add('visible');
   } else {
     winPanel.classList.remove('visible');
   }
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // Start the game
 init().catch(console.error);

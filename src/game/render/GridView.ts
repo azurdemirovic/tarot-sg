@@ -2,6 +2,7 @@ import { Container, Sprite, Graphics, Assets, BlurFilter } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
 import { Grid, TarotColumn } from '../Types';
 import { ReelSpinner } from './ReelSpinner';
+import { DEBUG } from '../config/debug';
 
 export class GridView extends Container {
   private cellSize: number = 156; // 120 * 1.3
@@ -220,6 +221,19 @@ export class GridView extends Container {
     }
   }
 
+  /**
+   * Update specific columns with new symbols (e.g. after tarot feature transform).
+   * Used to visually replace Fool columns with WILDs/PREMIUMs.
+   */
+  updateColumns(grid: Grid, columns: number[]): void {
+    for (const col of columns) {
+      if (col < grid.length) {
+        const symbolIds = grid[col].map(cell => cell.symbolId);
+        this.reelSpinners[col].setSymbols(symbolIds, false); // No longer tarot after transform
+      }
+    }
+  }
+
   update(delta: number): void {
     if (this.isAnimating) {
       this.reelSpinners.forEach(reel => reel.update(delta));
@@ -231,6 +245,18 @@ export class GridView extends Container {
   }
 
   showPlaceholder(): void {
+    if (DEBUG.showTarotsOnStart) {
+      // Debug mode: show all 5 tarots as full-column stacks
+      const tarotIds = ['T_FOOL', 'T_CUPS', 'T_LOVERS', 'T_PRIESTESS', 'T_DEATH'];
+      for (let col = 0; col < this.cols; col++) {
+        const tarotId = tarotIds[col % tarotIds.length];
+        const symbolIds = [tarotId, tarotId, tarotId]; // same tarot fills all 3 rows
+        this.reelSpinners[col].setSymbols(symbolIds, true); // isTarotColumn = true
+      }
+      console.log('🃏 DEBUG: Showing all 5 tarots on initial screen');
+      return;
+    }
+
     const placeholders = ['COIN', 'CUP', 'KEY', 'SWORD', 'RING', 'FLEUR'];
     
     for (let col = 0; col < this.cols; col++) {

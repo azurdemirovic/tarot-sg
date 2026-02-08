@@ -22,12 +22,12 @@ export class SpinGenerator {
     let tarotTypes: string[] = [];
 
     if (hasTarots) {
-      // Determine how many tarot columns (weighted: 1=70%, 2=25%, 3=5%)
+      // Determine how many tarot columns (testing bias: 1=20%, 2=50%, 3=30%)
       const tarotCountRoll = this.rng.nextFloat();
       let tarotCount = 1;
-      if (tarotCountRoll > 0.70 && tarotCountRoll <= 0.95) {
+      if (tarotCountRoll > 0.20 && tarotCountRoll <= 0.70) {
         tarotCount = 2;
-      } else if (tarotCountRoll > 0.95) {
+      } else if (tarotCountRoll > 0.70) {
         tarotCount = 3;
       }
 

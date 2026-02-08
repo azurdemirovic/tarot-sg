@@ -92,7 +92,7 @@
       "id": "T_FOOL",
       "tier": "TAROT",
       "filename": "T_FOOL.jpg",
-      "baseWeight": 8,
+      "baseWeight": 10,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
@@ -100,7 +100,7 @@
       "id": "T_CUPS",
       "tier": "TAROT",
       "filename": "T_CUPS.jpg",
-      "baseWeight": 8,
+      "baseWeight": 0,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
@@ -108,7 +108,7 @@
       "id": "T_LOVERS",
       "tier": "TAROT",
       "filename": "T_LOVERS.jpg",
-      "baseWeight": 5,
+      "baseWeight": 0,
       "payValues": [0, 0, 20, 40, 100],
       "isTarot": true
     },
@@ -116,7 +116,7 @@
       "id": "T_PRIESTESS",
       "tier": "TAROT",
       "filename": "T_PRIESTESS.jpg",
-      "baseWeight": 3,
+      "baseWeight": 0,
       "payValues": [0, 0, 30, 60, 150],
       "isTarot": true
     },
@@ -124,7 +124,7 @@
       "id": "T_DEATH",
       "tier": "TAROT",
       "filename": "T_DEATH.jpg",
-      "baseWeight": 3,
+      "baseWeight": 0,
       "payValues": [0, 0, 30, 60, 150],
       "isTarot": true
     }
