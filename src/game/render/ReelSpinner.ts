@@ -12,6 +12,8 @@ export class ReelSpinner extends Container {
   private readonly rows: number;
   private finalSymbols: string[] = [];
   private isTarotColumn: boolean = false;
+  private cardbackId: string | null = null;       // cardback texture ID shown during spin
+  private actualTarotId: string | null = null;     // real tarot texture ID for flip reveal
   
   // Bounce state
   private bouncing: boolean = false;
@@ -59,9 +61,11 @@ export class ReelSpinner extends Container {
     this.maskGraphic.fill({ color: 0xffffff });
   }
 
-  startSpin(finalSymbols: string[], isTarotColumn: boolean = false): void {
+  startSpin(finalSymbols: string[], isTarotColumn: boolean = false, cardbackId?: string): void {
     this.finalSymbols = finalSymbols;
     this.isTarotColumn = isTarotColumn;
+    this.cardbackId = cardbackId || null;
+    this.actualTarotId = isTarotColumn ? finalSymbols[0] : null;
     this.updateMask();
     this.isSpinning = true;
     this.bouncing = false;
@@ -86,8 +90,14 @@ export class ReelSpinner extends Container {
       }
     }
     
-    // Strip = [final0, final1, final2, filler0, ..., filler19]
-    const stripSymbols = [...finalSymbols, ...fillerSymbols];
+    // If tarot column with cardback, use cardback ID for the tall display sprite
+    const displaySymbols = [...finalSymbols];
+    if (isTarotColumn && cardbackId) {
+      displaySymbols[0] = cardbackId; // Show cardback instead of tarot face
+    }
+    
+    // Strip = [display0, display1, display2, filler0, ..., filler49]
+    const stripSymbols = [...displaySymbols, ...fillerSymbols];
     
     this.rebuildStrip(stripSymbols);
     this.scrollOffset = -fillerCount * this.step; // Start showing filler
@@ -238,5 +248,28 @@ export class ReelSpinner extends Container {
   /** Returns true only if still scrolling (hasn't been told to stop yet) */
   isStillScrolling(): boolean {
     return this.isSpinning;
+  }
+
+  /** Hide/show the symbol container (used during Fool reveal animation) */
+  setColumnVisible(visible: boolean): void {
+    this.symbolContainer.alpha = visible ? 1 : 0;
+  }
+
+  /** Get the first `rows` sprites (the visible final symbols) for external animation */
+  getVisibleSprites(): Sprite[] {
+    return this.strip.slice(0, this.rows);
+  }
+
+  /** Get the tall tarot/cardback sprite (index 0) if this is a tarot column */
+  getTarotSprite(): Sprite | null {
+    if (this.isTarotColumn && this.strip.length > 0) {
+      return this.strip[0];
+    }
+    return null;
+  }
+
+  /** Get the actual tarot symbol ID (used for texture swap during flip) */
+  getActualTarotId(): string | null {
+    return this.actualTarotId;
   }
 }

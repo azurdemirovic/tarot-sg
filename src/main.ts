@@ -3,6 +3,7 @@ import { AssetLoader } from './game/AssetLoader';
 import { GameController, SpinOutput } from './game/GameController';
 import { GridView } from './game/render/GridView';
 import { PaylineOverlay } from './game/render/PaylineOverlay';
+import { FoolRevealAnimation } from './game/render/FoolRevealAnimation';
 import { ThreeBackground } from './threeBackground';
 import { DEBUG } from './game/config/debug';
 
@@ -173,19 +174,37 @@ async function handleSpin() {
   safetyTimeout = setTimeout(() => resetState(), SAFETY_TIMEOUT_MS);
 
   try {
-    // ── Phase 1: Spin & land the INITIAL grid (with tarot columns visible) ──
+    // ── Phase 1: Spin & land the INITIAL grid (cardbacks shown for tarot columns) ──
     await gridView.spinToGrid(spinOutput.initialGrid, spinOutput.tarotColumns);
 
-    // ── Phase 2: If a feature triggered, animate the transformation ──
+    // ── Phase 1.5: Flip cardbacks to reveal tarot faces ──
+    if (spinOutput.tarotColumns.length > 0) {
+      spinBtn.disabled = true; // Lock button during reveal sequence
+      await delay(400); // Suspense pause — player sees cardbacks
+      await gridView.flipTarotColumns(spinOutput.tarotColumns);
+      await delay(300); // Brief pause to admire revealed tarots
+    }
+
+    // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
-      // Brief pause so player sees the Fool columns before they transform
-      await delay(800);
+      spinBtn.disabled = true; // Lock button during reveal
 
-      // Swap the Fool columns to show WILDs + PREMIUMs
-      gridView.updateColumns(spinOutput.finalGrid, spinOutput.feature.columns);
+      const foolReveal = new FoolRevealAnimation(
+        gridView,
+        gridView.getReelSpinners(),
+        assetLoader,
+        gridView.getCellSize(),
+        gridView.getPadding(),
+        gridView.getCols(),
+        gridView.getRows()
+      );
 
-      // Another brief pause for the player to see the new symbols
-      await delay(400);
+      await foolReveal.play(
+        spinOutput.feature,
+        spinOutput.foolResult,
+        spinOutput.finalGrid,
+        spinOutput.multiplier
+      );
     }
 
     // ── Phase 3: Show results ──

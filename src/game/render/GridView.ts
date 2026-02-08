@@ -1,4 +1,4 @@
-import { Container, Sprite, Graphics, Assets, BlurFilter } from 'pixi.js';
+import { Container, Sprite, Graphics, Assets, BlurFilter, Texture } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
 import { Grid, TarotColumn } from '../Types';
 import { ReelSpinner } from './ReelSpinner';
@@ -131,13 +131,16 @@ export class GridView extends Container {
   async spinToGrid(grid: Grid, tarotColumns: TarotColumn[] = []): Promise<void> {
     this.isAnimating = true;
     
-    // Determine which columns are tarot
-    const tarotColSet = new Set(tarotColumns.map(tc => tc.col));
+    // Build a map: col → tarotType for quick lookup
+    const tarotColMap = new Map(tarotColumns.map(tc => [tc.col, tc.tarotType]));
     
-    // Start all reels spinning
+    // Start all reels spinning — tarot columns get cardback IDs
     this.reelSpinners.forEach((reel, col) => {
       const symbolIds = grid[col].map(cell => cell.symbolId);
-      reel.startSpin(symbolIds, tarotColSet.has(col));
+      const tarotType = tarotColMap.get(col);
+      const isTarot = !!tarotType;
+      const cardbackId = tarotType ? this.assetLoader.getCardbackId(tarotType) : undefined;
+      reel.startSpin(symbolIds, isTarot, cardbackId);
     });
     
     // Wait until ALL reels have fully settled (stopped + bounce done)
@@ -234,6 +237,83 @@ export class GridView extends Container {
     }
   }
 
+  /**
+   * 3D card-flip animation: cardbacks → tarot faces.
+   * Each column flips with a slight stagger for drama.
+   */
+  async flipTarotColumns(tarotColumns: TarotColumn[]): Promise<void> {
+    const stagger = 150; // ms between column flips
+    const sorted = [...tarotColumns].sort((a, b) => a.col - b.col);
+    const flipPromises: Promise<void>[] = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const tc = sorted[i];
+      const reel = this.reelSpinners[tc.col];
+      const tarotSprite = reel.getTarotSprite();
+      if (!tarotSprite) continue;
+
+      const tarotTexture = this.assetLoader.getTexture(tc.tarotType);
+      if (!tarotTexture) continue;
+
+      // Stagger each flip
+      flipPromises.push(
+        new Promise<void>(resolve => setTimeout(resolve, i * stagger))
+          .then(() => this.flipSprite(tarotSprite, tarotTexture))
+      );
+    }
+
+    await Promise.all(flipPromises);
+  }
+
+  /**
+   * Animate a single sprite's "3D flip": scaleX 1→0 (close), swap texture, scaleX 0→1 (open).
+   * Slight Y-scale bulge at midpoint to simulate perspective.
+   */
+  private flipSprite(sprite: Sprite, newTexture: Texture): Promise<void> {
+    return new Promise(resolve => {
+      const duration = 500; // ms
+      const start = performance.now();
+      const targetWidth = sprite.width;
+      const targetHeight = sprite.height;
+      let textureSwapped = false;
+
+      const animate = (now: number) => {
+        const elapsed = now - start;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t <= 0.5) {
+          // Phase 1: close (width → ~0)
+          const phase = t / 0.5; // 0 → 1
+          const ease = 1 - Math.pow(1 - phase, 2); // easeOutQuad
+          sprite.width = Math.max(1, targetWidth * (1 - ease));
+          // Slight Y bulge for perspective
+          sprite.height = targetHeight * (1 + Math.sin(phase * Math.PI) * 0.06);
+        } else {
+          // Swap texture at midpoint
+          if (!textureSwapped) {
+            sprite.texture = newTexture;
+            textureSwapped = true;
+          }
+          // Phase 2: open (width 0 → target)
+          const phase = (t - 0.5) / 0.5; // 0 → 1
+          const ease = 1 - Math.pow(1 - phase, 3); // easeOutCubic
+          sprite.width = Math.max(1, targetWidth * ease);
+          sprite.height = targetHeight * (1 + Math.sin((1 - phase) * Math.PI) * 0.06);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          sprite.width = targetWidth;
+          sprite.height = targetHeight;
+          resolve();
+        }
+      };
+
+      requestAnimationFrame(animate);
+    });
+  }
+
   update(delta: number): void {
     if (this.isAnimating) {
       this.reelSpinners.forEach(reel => reel.update(delta));
@@ -267,6 +347,13 @@ export class GridView extends Container {
       this.reelSpinners[col].setSymbols(symbolIds);
     }
   }
+
+  // ── Accessors for FoolRevealAnimation ──
+  getReelSpinners(): ReelSpinner[] { return this.reelSpinners; }
+  getCellSize(): number { return this.cellSize; }
+  getPadding(): number { return this.padding; }
+  getCols(): number { return this.cols; }
+  getRows(): number { return this.rows; }
 
   /**
    * Clear all sprites
