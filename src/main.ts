@@ -203,7 +203,10 @@ async function handleSpin() {
         spinOutput.feature,
         spinOutput.foolResult,
         spinOutput.finalGrid,
-        spinOutput.multiplier
+        spinOutput.multiplier,
+        spinOutput.wins,
+        spinOutput.totalWin,
+        gameController.betAmount
       );
     }
 
