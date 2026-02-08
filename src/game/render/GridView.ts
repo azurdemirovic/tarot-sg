@@ -1,6 +1,6 @@
 import { Container, Sprite, Graphics, Assets, BlurFilter } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
-import { Grid } from '../Types';
+import { Grid, TarotColumn } from '../Types';
 import { ReelSpinner } from './ReelSpinner';
 
 export class GridView extends Container {
@@ -87,21 +87,7 @@ export class GridView extends Container {
     this.bgPlaceholder.fill({ color: 0xffffff, alpha: 1.0 });
     this.addChild(this.bgPlaceholder);
 
-    // Create reel spinners
-    for (let col = 0; col < this.cols; col++) {
-      const reelSpinner = new ReelSpinner(this.assetLoader, this.cellSize, this.rows, this.padding);
-      reelSpinner.position.set(col * (this.cellSize + this.padding), 0);
-      this.addChild(reelSpinner);
-      this.reelSpinners.push(reelSpinner);
-      
-      this.sprites[col] = [];
-      for (let row = 0; row < this.rows; row++) {
-        this.sprites[col][row] = new Sprite();
-      }
-      
-    }
-
-    // Grid border: outer border + internal grid lines
+    // Grid border: outer border + internal grid lines (BEHIND symbols)
     const gridLines = new Graphics();
     // Outer border
     gridLines.rect(0, 0, totalWidth, totalHeight);
@@ -123,18 +109,34 @@ export class GridView extends Container {
     // Apply blur filter to soften the lines
     gridLines.filters = [new BlurFilter({ strength: 1.76 })];
     this.addChild(gridLines);
+
+    // Create reel spinners (ON TOP of grid lines)
+    for (let col = 0; col < this.cols; col++) {
+      const reelSpinner = new ReelSpinner(this.assetLoader, this.cellSize, this.rows, this.padding);
+      reelSpinner.position.set(col * (this.cellSize + this.padding), 0);
+      this.addChild(reelSpinner);
+      this.reelSpinners.push(reelSpinner);
+      
+      this.sprites[col] = [];
+      for (let row = 0; row < this.rows; row++) {
+        this.sprites[col][row] = new Sprite();
+      }
+    }
   }
 
   private pendingStopTimers: ReturnType<typeof setTimeout>[] = [];
   private spinDoneResolve: (() => void) | null = null;
 
-  async spinToGrid(grid: Grid): Promise<void> {
+  async spinToGrid(grid: Grid, tarotColumns: TarotColumn[] = []): Promise<void> {
     this.isAnimating = true;
+    
+    // Determine which columns are tarot
+    const tarotColSet = new Set(tarotColumns.map(tc => tc.col));
     
     // Start all reels spinning
     this.reelSpinners.forEach((reel, col) => {
       const symbolIds = grid[col].map(cell => cell.symbolId);
-      reel.startSpin(symbolIds);
+      reel.startSpin(symbolIds, tarotColSet.has(col));
     });
     
     // Wait until ALL reels have fully settled (stopped + bounce done)
@@ -207,12 +209,13 @@ export class GridView extends Container {
     }
   }
 
-  updateGrid(grid: Grid): void {
+  updateGrid(grid: Grid, tarotColumns: TarotColumn[] = []): void {
     // Only update if not animating (for initial display)
     if (!this.isAnimating) {
+      const tarotColSet = new Set(tarotColumns.map(tc => tc.col));
       for (let col = 0; col < grid.length; col++) {
         const symbolIds = grid[col].map(cell => cell.symbolId);
-        this.reelSpinners[col].setSymbols(symbolIds);
+        this.reelSpinners[col].setSymbols(symbolIds, tarotColSet.has(col));
       }
     }
   }

@@ -166,7 +166,7 @@ async function handleSpin() {
   try {
     // This await resolves when ALL reels have stopped + bounced
     // Whether natural or hurried, the same promise resolves
-    await gridView.spinToGrid(grid);
+    await gridView.spinToGrid(grid, tarotColumns);
     await showResults();
   } catch (error) {
     console.error('❌ Spin error:', error);

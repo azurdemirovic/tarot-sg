@@ -55,8 +55,8 @@ export class GameController {
     this.isSpinning = true;
     this.balance -= this.betAmount;
 
-    // Generate spin result
-    const { grid, tarotColumns } = this.spinGenerator.generateSpin();
+    // Generate spin result (tarotChance 0.5 = 50% for testing)
+    const { grid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.5);
     this.currentGrid = grid;
     this.lastTarotColumns = tarotColumns;
 

@@ -11,6 +11,7 @@ export class ReelSpinner extends Container {
   private readonly cellSize: number;
   private readonly rows: number;
   private finalSymbols: string[] = [];
+  private isTarotColumn: boolean = false;
   
   // Bounce state
   private bouncing: boolean = false;
@@ -20,6 +21,8 @@ export class ReelSpinner extends Container {
 
   private readonly padding: number;
   private readonly step: number; // cellSize + padding
+  private maskGraphic: Graphics;
+  private readonly maskHeight: number;
 
   constructor(
     private assetLoader: AssetLoader,
@@ -37,16 +40,29 @@ export class ReelSpinner extends Container {
     this.addChild(this.symbolContainer);
     
     // Mask covers the full grid height including padding between rows
-    const maskHeight = rows * cellSize + (rows - 1) * padding;
-    const mask = new Graphics();
-    mask.rect(0, 0, cellSize, maskHeight);
-    mask.fill({ color: 0xffffff });
-    this.addChild(mask);
-    this.symbolContainer.mask = mask;
+    this.maskHeight = rows * cellSize + (rows - 1) * padding;
+    this.maskGraphic = new Graphics();
+    this.maskGraphic.rect(0, 0, cellSize, this.maskHeight);
+    this.maskGraphic.fill({ color: 0xffffff });
+    this.addChild(this.maskGraphic);
+    this.symbolContainer.mask = this.maskGraphic;
   }
 
-  startSpin(finalSymbols: string[]): void {
+  private updateMask(): void {
+    this.maskGraphic.clear();
+    if (this.isTarotColumn) {
+      // Extend mask into padding gaps on both sides so tarot bleeds edge-to-edge
+      this.maskGraphic.rect(-this.padding / 2, 0, this.cellSize + this.padding, this.maskHeight);
+    } else {
+      this.maskGraphic.rect(0, 0, this.cellSize, this.maskHeight);
+    }
+    this.maskGraphic.fill({ color: 0xffffff });
+  }
+
+  startSpin(finalSymbols: string[], isTarotColumn: boolean = false): void {
     this.finalSymbols = finalSymbols;
+    this.isTarotColumn = isTarotColumn;
+    this.updateMask();
     this.isSpinning = true;
     this.bouncing = false;
     this.velocity = 60; // Fast constant speed
@@ -160,6 +176,13 @@ export class ReelSpinner extends Container {
       // Downward scroll: use step (cellSize + padding) for proper grid alignment
       sprite.y = (index * this.step + this.scrollOffset + this.bounceOffset) + this.cellSize / 2;
     });
+    
+    // For tarot columns: center the tall sprite across all 3 cell positions
+    if (this.isTarotColumn && this.strip.length > 0) {
+      // Normal index-0 center = cellSize/2; we need it at (3*cellSize + 2*padding)/2
+      // Difference = step (= cellSize + padding)
+      this.strip[0].y += this.step;
+    }
   }
 
   private rebuildStrip(symbolIds: string[]): void {
@@ -167,22 +190,39 @@ export class ReelSpinner extends Container {
     this.strip = [];
     this.symbolContainer.removeChildren();
     
-    symbolIds.forEach((symbolId) => {
+    const totalColumnHeight = this.rows * this.cellSize + (this.rows - 1) * this.padding;
+    
+    symbolIds.forEach((symbolId, index) => {
       const sprite = new Sprite();
       const texture = this.assetLoader.getTexture(symbolId);
       if (texture) sprite.texture = texture;
       
       sprite.anchor.set(0.5);
-      sprite.width = this.cellSize - 20;
-      sprite.height = this.cellSize - 20;
       sprite.x = this.cellSize / 2;
+      
+      if (this.isTarotColumn && index === 0) {
+        // First final symbol: tall image spanning all 3 cells, bleeds into padding gaps
+        sprite.width = this.cellSize + this.padding;
+        sprite.height = totalColumnHeight;
+      } else if (this.isTarotColumn && index > 0 && index < this.rows) {
+        // Other final tarot slots: hide them (tall sprite covers their area)
+        sprite.width = this.cellSize - 20;
+        sprite.height = this.cellSize - 20;
+        sprite.alpha = 0;
+      } else {
+        // Normal symbol or filler
+        sprite.width = this.cellSize - 20;
+        sprite.height = this.cellSize - 20;
+      }
       
       this.symbolContainer.addChild(sprite);
       this.strip.push(sprite);
     });
   }
 
-  setSymbols(symbolIds: string[]): void {
+  setSymbols(symbolIds: string[], isTarotColumn: boolean = false): void {
+    this.isTarotColumn = isTarotColumn;
+    this.updateMask();
     this.finalSymbols = symbolIds;
     this.rebuildStrip(symbolIds);
     this.scrollOffset = 0;
