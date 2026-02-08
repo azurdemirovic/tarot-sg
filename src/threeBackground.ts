@@ -16,6 +16,8 @@ export class ThreeBackground {
   private animateCamera: boolean;
   private animationId: number = 0;
   private mixer: THREE.AnimationMixer | null = null;
+  private bgTexture: THREE.Texture | null = null;
+  private scrollSpeed: number = 0.02; // vertical scroll speed (units per second)
 
   constructor(options: ThreeBgOptions) {
     this.animateCamera = options.animate;
@@ -37,12 +39,23 @@ export class ThreeBackground {
     // ── Scene ──
     this.scene = new THREE.Scene();
 
-    // ── Background image ──
+    // ── Scrolling background plane ──
     const textureLoader = new THREE.TextureLoader();
     textureLoader.load('/assets/symbols_original/screen_blurred.jpg', (texture) => {
       texture.colorSpace = THREE.SRGBColorSpace;
-      this.scene.background = texture;
-      console.log('✅ Three.js background image loaded');
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 1);
+      this.bgTexture = texture;
+
+      // Large plane far behind everything, filling the view
+      const planeGeo = new THREE.PlaneGeometry(120, 120);
+      const planeMat = new THREE.MeshBasicMaterial({ map: texture });
+      const bgPlane = new THREE.Mesh(planeGeo, planeMat);
+      bgPlane.position.set(0, 0, -50); // far behind model
+      this.scene.add(bgPlane);
+
+      console.log('✅ Scrolling background loaded');
     });
 
     // ── Camera ──
@@ -184,6 +197,11 @@ export class ThreeBackground {
     this.animationId = requestAnimationFrame(this.renderLoop);
 
     const delta = this.clock.getDelta();
+
+    // Scroll background texture vertically
+    if (this.bgTexture) {
+      this.bgTexture.offset.y += this.scrollSpeed * delta;
+    }
 
     // Tick animation mixer
     if (this.mixer) {
