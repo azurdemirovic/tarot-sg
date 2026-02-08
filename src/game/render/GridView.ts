@@ -1,4 +1,4 @@
-import { Container, Sprite, Graphics, Assets } from 'pixi.js';
+import { Container, Sprite, Graphics, Assets, BlurFilter } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
 import { Grid } from '../Types';
 import { ReelSpinner } from './ReelSpinner';
@@ -99,19 +99,30 @@ export class GridView extends Container {
         this.sprites[col][row] = new Sprite();
       }
       
-      // Cell borders
-      for (let row = 0; row < this.rows; row++) {
-        const cellBorder = new Graphics();
-        cellBorder.rect(
-          col * (this.cellSize + this.padding),
-          row * (this.cellSize + this.padding),
-          this.cellSize,
-          this.cellSize
-        );
-        cellBorder.stroke({ color: 0xdddddd, width: 2 });
-        this.addChild(cellBorder);
-      }
     }
+
+    // Grid border: outer border + internal grid lines
+    const gridLines = new Graphics();
+    // Outer border
+    gridLines.rect(0, 0, totalWidth, totalHeight);
+    gridLines.stroke({ color: 0xdddddd, width: 2 });
+    // Vertical internal lines
+    for (let col = 1; col < this.cols; col++) {
+      const x = col * (this.cellSize + this.padding) - this.padding / 2;
+      gridLines.moveTo(x, 0);
+      gridLines.lineTo(x, totalHeight);
+      gridLines.stroke({ color: 0xdddddd, width: 1 });
+    }
+    // Horizontal internal lines
+    for (let row = 1; row < this.rows; row++) {
+      const y = row * (this.cellSize + this.padding) - this.padding / 2;
+      gridLines.moveTo(0, y);
+      gridLines.lineTo(totalWidth, y);
+      gridLines.stroke({ color: 0xdddddd, width: 1 });
+    }
+    // Apply blur filter to soften the lines
+    gridLines.filters = [new BlurFilter({ strength: 1.76 })];
+    this.addChild(gridLines);
   }
 
   private pendingStopTimers: ReturnType<typeof setTimeout>[] = [];

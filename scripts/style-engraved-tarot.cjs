@@ -61,11 +61,21 @@ function rimLightSVG(w, h) {
   </svg>`);
 }
 
+/* ── Per-symbol overrides (more "fried" = darker, higher contrast) ── */
+const OVERRIDES = {
+  'DICE.png':  { contrast: 2.8, offset: -130, brightness: 0.60, gamma: 2.2, posterize: 5 },
+  'KING.png':  { contrast: 2.4, offset: -100, brightness: 0.70, gamma: 1.8, posterize: 6 },
+};
+
+const DEFAULTS = { contrast: 1.5, offset: -40, brightness: 0.95, gamma: null, posterize: null };
+
 /* ── Main processing pipeline ───────────────────────── */
 
 async function processSymbol(filename) {
   const input = path.join(SRC, filename);
   const output = path.join(OUT, filename);
+
+  const opts = { ...DEFAULTS, ...(OVERRIDES[filename] || {}) };
 
   // Read original dimensions
   const meta = await sharp(input).metadata();
@@ -79,15 +89,36 @@ async function processSymbol(filename) {
 
   // 1 ▸ Flatten to white bg, then grayscale + crush blacks
   //     (flatten removes alpha so effects work on solid pixels)
-  const base = await sharp(input)
+  let baseChain = sharp(input)
     .flatten({ background: { r: 255, g: 255, b: 255 } })
     .grayscale()
-    .linear(1.5, -40)
-    .modulate({ brightness: 0.95 })
-    .toBuffer();
+    .linear(opts.contrast, opts.offset)
+    .modulate({ brightness: opts.brightness });
+  
+  // Optional: gamma to crush highlights (kills glossy metal shine)
+  if (opts.gamma) {
+    baseChain = baseChain.gamma(opts.gamma);
+  }
+  
+  const base = await baseChain.toBuffer();
+  
+  // Optional: posterize to flatten tonal range (matte engraving look)
+  // sharp doesn't have native posterize, so we do it manually
+  let baseFinal = base;
+  if (opts.posterize) {
+    const { data, info } = await sharp(base).raw().toBuffer({ resolveWithObject: true });
+    const levels = opts.posterize;
+    const step = 255 / (levels - 1);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = Math.round(Math.round(data[i] / step) * step);
+    }
+    baseFinal = await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+      .png()
+      .toBuffer();
+  }
 
   // 2 ▸ Edge detection for engraved ink-line look
-  const edges = await sharp(base)
+  const edges = await sharp(baseFinal)
     .convolve({
       width: 3, height: 3,
       kernel: [-1, -1, -1,  -1, 8, -1,  -1, -1, -1],
@@ -116,7 +147,7 @@ async function processSymbol(filename) {
     .toBuffer();
 
   // 6 ▸ Composite all effects (result is opaque RGB)
-  const styled = await sharp(base)
+  const styled = await sharp(baseFinal)
     .composite([
       { input: edges,      blend: 'multiply',   top: 0, left: 0 },
       { input: crosshatch, blend: 'multiply',   top: 0, left: 0 },

@@ -85,6 +85,14 @@ async function init() {
     spinBtn.disabled = false;
     spinBtn.addEventListener('click', handleSpin);
 
+    // Space bar triggers spin
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleSpin();
+      }
+    });
+
     console.log('✅ Game ready! Canvas size:', app.canvas.width, 'x', app.canvas.height);
     
     app.ticker.add((ticker) => {
