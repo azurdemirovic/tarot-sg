@@ -19,6 +19,7 @@ export class ThreeBackground {
   private bgTexture: THREE.Texture | null = null;
   private scrollSpeed: number = 0.02; // vertical scroll speed (units per second)
 
+  
   constructor(options: ThreeBgOptions) {
     this.animateCamera = options.animate;
     this.clock = new THREE.Clock();
@@ -61,7 +62,7 @@ export class ThreeBackground {
     // ── Camera ──
     const aspect = window.innerWidth / window.innerHeight;
     this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 500);
-    this.camera.position.set(0, 2, 25);
+    this.camera.position.set(-4.5, 0.0, 36.5);
     this.camera.lookAt(0, 0, 0);
 
     // ── Lighting: hard 50/50 split — one half lit, one half pure shadow ──
@@ -96,24 +97,14 @@ export class ThreeBackground {
       (gltf) => {
         const model = gltf.scene;
 
-        // Auto-center and auto-scale
+        // Auto-scale only (no centering or shifting — position set via bgGroup)
         const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
 
-        // Center at origin
-        model.position.sub(center);
-
-        // Scale so max dimension ≈ 20 units
         const maxDim = Math.max(size.x, size.y, size.z);
-        const targetSize = 17;
+        const targetSize = 164;
         const scale = targetSize / maxDim;
         model.scale.setScalar(scale);
-
-        // Shift model up so its BOTTOM sits at y=0 of the group
-        const scaledBox = new THREE.Box3().setFromObject(model);
-        const bottomY = scaledBox.min.y;
-        model.position.y -= bottomY; // lifts bottom to y=0
 
         // Performance: frustum culling + desaturate to black & white
         model.traverse((child) => {
@@ -163,9 +154,8 @@ export class ThreeBackground {
 
         this.bgGroup.add(model);
 
-        // Position: right border of grid, bottom aligned with grid bottom
-        // Grid bottom in 3D space is roughly y ≈ -6
-        this.bgGroup.position.set(18, -7.7, -15);
+        // Position the model
+        this.bgGroup.position.set(11.5, 0.5, 12.0);
 
         // ── Play animations if available ──
         if (gltf.animations && gltf.animations.length > 0) {
@@ -180,6 +170,7 @@ export class ThreeBackground {
         console.log(
           `✅ 3D background loaded: ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)} → scaled ${scale.toFixed(3)}`
         );
+
       },
       (progress) => {
         if (progress.total > 0) {
@@ -208,13 +199,13 @@ export class ThreeBackground {
       this.mixer.update(delta);
     }
 
-    if (this.animateCamera) {
-      const elapsed = this.clock.getElapsedTime();
-      // Very slow subtle drift
-      this.camera.position.x = Math.sin(elapsed * 0.08) * 1.5;
-      this.camera.position.y = 2 + Math.sin(elapsed * 0.05) * 0.5;
-      this.camera.lookAt(0, 0, -15);
-    }
+    // Camera animation disabled — using fixed position
+    // if (this.animateCamera) {
+    //   const elapsed = this.clock.getElapsedTime();
+    //   this.camera.position.x = 12.0 + Math.sin(elapsed * 0.08) * 1.5;
+    //   this.camera.position.y = 18.5 + Math.sin(elapsed * 0.05) * 0.5;
+    //   this.camera.lookAt(0, 0, 0);
+    // }
 
     this.renderer.render(this.scene, this.camera);
   };
