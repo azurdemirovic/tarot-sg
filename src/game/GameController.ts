@@ -2,7 +2,7 @@ import { RNG } from './RNG';
 import { AssetLoader } from './AssetLoader';
 import { SpinGenerator } from './logic/SpinGenerator';
 import { PaylineEvaluator } from './logic/PaylineEvaluator';
-import { TarotFeatureProcessor, FoolResult } from './logic/TarotFeatureProcessor';
+import { TarotFeatureProcessor, FoolResult, CupsResult } from './logic/TarotFeatureProcessor';
 import { Grid, TarotColumn, FeatureTrigger, GameMode, WinLine } from './Types';
 
 export interface SpinOutput {
@@ -13,6 +13,8 @@ export interface SpinOutput {
   feature: FeatureTrigger | null;
   /** If Fool triggered, details of the transformation */
   foolResult: FoolResult | null;
+  /** If Cups triggered, details of the initial multipliers */
+  cupsResult: CupsResult | null;
   /** The final grid used for payline evaluation (after feature, if any) */
   finalGrid: Grid;
   wins: WinLine[];
@@ -76,6 +78,7 @@ export class GameController {
     // ── Phase 2: detect & apply tarot feature ──
     const feature = this.featureProcessor.detectTrigger(tarotColumns);
     let foolResult: FoolResult | null = null;
+    let cupsResult: CupsResult | null = null;
     let multiplier = 1;
 
     if (feature) {
@@ -84,8 +87,12 @@ export class GameController {
       if (feature.type === 'T_FOOL') {
         foolResult = this.featureProcessor.applyFool(finalGrid, feature);
         multiplier = foolResult.multiplier;
+      } else if (feature.type === 'T_CUPS') {
+        cupsResult = this.featureProcessor.applyCups(finalGrid, feature);
+        // Cups feature doesn't apply multiplier during initial spin
+        // The multiplier collection loop will be handled in the animation
       }
-      // Other features (Cups, Lovers, Priestess, Death) → future implementation
+      // Other features (Lovers, Priestess, Death) → future implementation
     }
 
     // ── Phase 3: evaluate paylines on the *final* grid ──
@@ -118,6 +125,7 @@ export class GameController {
       tarotColumns,
       feature,
       foolResult,
+      cupsResult,
       finalGrid,
       wins,
       totalWin,
@@ -131,6 +139,7 @@ export class GameController {
       tarotColumns: this.lastTarotColumns,
       feature: null,
       foolResult: null,
+      cupsResult: null,
       finalGrid: this.currentGrid!,
       wins: this.lastWins,
       totalWin: this.lastWin,
@@ -152,11 +161,14 @@ export class GameController {
 
     const feature = this.featureProcessor.detectTrigger(tarotColumns);
     let foolResult: FoolResult | null = null;
+    let cupsResult: CupsResult | null = null;
     let multiplier = 1;
 
     if (feature && feature.type === 'T_FOOL') {
       foolResult = this.featureProcessor.applyFool(finalGrid, feature);
       multiplier = foolResult.multiplier;
+    } else if (feature && feature.type === 'T_CUPS') {
+      cupsResult = this.featureProcessor.applyCups(finalGrid, feature);
     }
 
     const wins = this.paylineEvaluator.evaluateAllPaylines(finalGrid);
@@ -169,7 +181,7 @@ export class GameController {
 
     this.isSpinning = false;
 
-    return { initialGrid, tarotColumns, feature, foolResult, finalGrid, wins, totalWin, multiplier };
+    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, finalGrid, wins, totalWin, multiplier };
   }
 
   getSeed(): number { return this.rng.getState(); }
@@ -192,5 +204,13 @@ export class GameController {
       parts.push(`${simpleName} (R${cols.join(',')})`);
     });
     return parts.join(' | ');
+  }
+
+  getCurrentSeed(): number {
+    return this.rng.getState();
+  }
+
+  getGrid(): Grid {
+    return this.currentGrid!;
   }
 }

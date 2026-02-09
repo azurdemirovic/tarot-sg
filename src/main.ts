@@ -4,6 +4,7 @@ import { GameController, SpinOutput } from './game/GameController';
 import { GridView } from './game/render/GridView';
 import { PaylineOverlay } from './game/render/PaylineOverlay';
 import { FoolRevealAnimation } from './game/render/FoolRevealAnimation';
+import { CupsRevealAnimation } from './game/render/CupsRevealAnimation';
 import { ThreeBackground } from './threeBackground';
 import { DEBUG } from './game/config/debug';
 
@@ -132,6 +133,9 @@ let currentSpinData: SpinOutput | null = null;
 let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
+let hasSpunOnce: boolean = false; // Track if any spin has happened
+let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
+let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
 
 function resetState() {
   currentState = SpinState.IDLE;
@@ -143,6 +147,13 @@ function resetState() {
 }
 
 async function handleSpin() {
+  // ── CUPS FEATURE ACTIVE: Speed up current collection spin ──
+  if (cupsFeatureActive && currentCupsAnimation) {
+    console.log('⚡ Speeding up Cups collection spin');
+    currentCupsAnimation.skipCurrentSpin();
+    return;
+  }
+  
   // ── HURRY UP: double click speeds up landing ──
   if (currentState === SpinState.SPINNING && canSkip) {
     canSkip = false;
@@ -160,7 +171,16 @@ async function handleSpin() {
   winPanel.classList.remove('visible');
   canSkip = false;
 
-  const spinOutput = gameController.spin();
+  // Debug: Force Cups feature if enabled (only on first spin)
+  let spinOutput: SpinOutput;
+  if (DEBUG.FORCE_CUPS && !hasSpunOnce) {
+    console.log('🔧 DEBUG: Forcing Cups feature (first spin only)');
+    hasSpunOnce = true;
+    spinOutput = gameController.forceTarotSpin('T_CUPS', DEBUG.CUPS_COLUMNS);
+  } else {
+    spinOutput = gameController.spin();
+    hasSpunOnce = true;
+  }
   currentSpinData = spinOutput;
 
   // After 0.25s, unlock button for hurry-up
@@ -208,6 +228,40 @@ async function handleSpin() {
         spinOutput.totalWin,
         gameController.betAmount
       );
+    }
+
+    // ── Phase 2b: If a Cups feature triggered, play the multiplier collection animation ──
+    if (spinOutput.feature && spinOutput.feature.type === 'T_CUPS' && spinOutput.cupsResult) {
+      spinBtn.disabled = false; // Allow clicking to speed up Cups spins
+      cupsFeatureActive = true; // Mark Cups as active
+
+      const cupsReveal = new CupsRevealAnimation(
+        gridView,
+        gridView.getReelSpinners(),
+        assetLoader,
+        gridView.getCellSize(),
+        gridView.getPadding(),
+        gridView.getCols(),
+        gridView.getRows(),
+        gameController.getCurrentSeed()
+      );
+      
+      currentCupsAnimation = cupsReveal; // Store reference for skip functionality
+
+      const cupsPayout = await cupsReveal.play(
+        spinOutput.feature,
+        spinOutput.cupsResult,
+        gameController.betAmount
+      );
+
+      // Cups feature finished
+      cupsFeatureActive = false;
+      currentCupsAnimation = null;
+
+      // Update balance with Cups payout
+      gameController.balance += cupsPayout;
+      gameController.lastWin = cupsPayout;
+      currentSpinData.totalWin = cupsPayout;
     }
 
     // ── Phase 3: Show results ──

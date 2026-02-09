@@ -9,6 +9,11 @@ export interface FoolResult {
   premiumPlacements: { col: number; row: number; symbolId: string }[];
 }
 
+export interface CupsResult {
+  initialMultipliers: { col: number; row: number; value: number }[];
+  cupsColumns: number[];
+}
+
 export class TarotFeatureProcessor {
   constructor(
     private rng: RNG,
@@ -111,5 +116,57 @@ export class TarotFeatureProcessor {
     console.log(`🃏 Fool Feature: ${trigger.count} Fools → ${totalWilds} WILDs, ×${multiplier} multiplier`);
 
     return { transformedGrid: grid, multiplier, wildPlacements, premiumPlacements };
+  }
+
+  /**
+   * Apply the Cups feature to the grid.
+   * 
+   * 2 Cups → 2-4 initial multiplier cells (1-2 per column)
+   * 3 Cups → 6-9 initial multiplier cells (2-3 per column)
+   * 
+   * Initial multiplier values:
+   * - 2 Cups: Lower range (2x, 3x)
+   * - 3 Cups: Higher range (3x, 5x, 10x)
+   */
+  applyCups(grid: Grid, trigger: FeatureTrigger): CupsResult {
+    const rows = grid[0].length; // 3
+
+    // 1. Roll multiplier count per column
+    const perColMultipliers: number[] = [];
+    const multiplierPool2Cups = [2, 3];
+    const multiplierPool3Cups = [3, 5, 10];
+
+    for (let i = 0; i < trigger.columns.length; i++) {
+      if (trigger.count === 2) {
+        // 2 Cups: 1-2 multipliers per column
+        perColMultipliers.push(this.rng.nextInt(1, 2));
+      } else {
+        // 3 Cups: 2-3 multipliers per column
+        perColMultipliers.push(this.rng.nextInt(2, 3));
+      }
+    }
+
+    // 2. Place initial multipliers in each Cups column
+    const initialMultipliers: { col: number; row: number; value: number }[] = [];
+    const pool = trigger.count === 2 ? multiplierPool2Cups : multiplierPool3Cups;
+
+    trigger.columns.forEach((col, idx) => {
+      const multiplierCount = perColMultipliers[idx];
+
+      // Pick random rows to place multipliers
+      const rowIndices = Array.from({ length: rows }, (_, i) => i);
+      this.rng.shuffle(rowIndices);
+      const multiplierRows = rowIndices.slice(0, multiplierCount);
+
+      for (const row of multiplierRows) {
+        const value = this.rng.choice(pool);
+        initialMultipliers.push({ col, row, value });
+      }
+    });
+
+    const totalMultipliers = initialMultipliers.length;
+    console.log(`☕ Cups Feature: ${trigger.count} Cups → ${totalMultipliers} initial multipliers`);
+
+    return { initialMultipliers, cupsColumns: trigger.columns };
   }
 }

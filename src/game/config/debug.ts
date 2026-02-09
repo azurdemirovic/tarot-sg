@@ -4,11 +4,17 @@
  */
 export const DEBUG = {
   /** Show all 5 tarot cards on the initial screen (one per column, as full-column stacks) */
-  showTarotsOnStart: true,
+  showTarotsOnStart: false,
 
   /** Enable the Three.js 3D background behind the Pixi canvas */
   BG_ENABLED: true,
 
   /** Animate a slow camera drift on the 3D background (false = static) */
   BG_ANIMATE_CAMERA: true,
+
+  /** Force Cups feature on next spin (for testing) */
+  FORCE_CUPS: true,
+
+  /** Columns to place Cups cards (2 or 3 columns) */
+  CUPS_COLUMNS: [1, 3],
 };
