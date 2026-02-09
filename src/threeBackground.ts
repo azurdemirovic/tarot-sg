@@ -7,21 +7,37 @@ export interface ThreeBgOptions {
   animate: boolean;
 }
 
+// Feature color map — dominant hue from each tarot cardback
+const FEATURE_COLORS: Record<string, THREE.Color> = {
+  'T_FOOL':      new THREE.Color(0.1, 0.85, 0.3),   // Green
+  'T_CUPS':      new THREE.Color(0.3, 0.5, 1.0),    // Blue
+  'T_LOVERS':    new THREE.Color(0.9, 0.2, 0.3),    // Red/Rose
+  'T_PRIESTESS': new THREE.Color(0.6, 0.3, 0.9),    // Purple
+  'T_DEATH':     new THREE.Color(0.9, 0.15, 0.1),   // Dark Red
+};
+
 export class ThreeBackground {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private bgGroup: THREE.Group;
   private clock: THREE.Clock;
-  private animateCamera: boolean;
+  private _animateCamera: boolean; // Reserved for future camera animation
   private animationId: number = 0;
   private mixer: THREE.AnimationMixer | null = null;
   private bgTexture: THREE.Texture | null = null;
   private scrollSpeed: number = 0.02; // vertical scroll speed (units per second)
+  
+  // Feature color tinting
+  private featureColorUniform = { value: new THREE.Color(0, 0, 0) }; // Black = no color
+  private featureIntensityUniform = { value: 0.0 }; // 0 = grayscale, 1 = full spread
+  private featureOriginUniform = { value: new THREE.Vector3(0, 0, 0) }; // Spread origin (model space)
+  private targetIntensity: number = 0.0;
+  private targetColor: THREE.Color = new THREE.Color(0, 0, 0);
 
   
   constructor(options: ThreeBgOptions) {
-    this.animateCamera = options.animate;
+    this._animateCamera = options.animate;
     this.clock = new THREE.Clock();
 
     // ── Renderer ──
@@ -114,8 +130,27 @@ export class ThreeBackground {
             // Engraved tarot style: grayscale + crushed blacks + posterize + edge ink + grain
             const mesh = child as THREE.Mesh;
             const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            
             for (const mat of materials) {
+              const applyFeatureColor = true;
+              
               mat.onBeforeCompile = (shader) => {
+                // Inject uniforms for feature color tinting
+                shader.uniforms.featureColor = this.featureColorUniform;
+                shader.uniforms.featureIntensity = this.featureIntensityUniform;
+                shader.uniforms.featureOrigin = this.featureOriginUniform;
+                
+                shader.fragmentShader = `uniform vec3 featureColor;\nuniform float featureIntensity;\nuniform vec3 featureOrigin;\n#define APPLY_FEATURE_COLOR ${applyFeatureColor ? '1' : '0'}\n` + shader.fragmentShader;
+                
+                // Inject varying for world position
+                shader.vertexShader = 'varying vec3 vWorldPos;\n' + shader.vertexShader;
+                shader.vertexShader = shader.vertexShader.replace(
+                  '#include <worldpos_vertex>',
+                  `#include <worldpos_vertex>
+                  vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+                );
+                shader.fragmentShader = 'varying vec3 vWorldPos;\n' + shader.fragmentShader;
+                
                 shader.fragmentShader = shader.fragmentShader.replace(
                   '#include <dithering_fragment>',
                   `
@@ -144,7 +179,24 @@ export class ThreeBackground {
                   noise = (noise - 0.5) * 0.04;
                   gray = clamp(gray + noise, 0.0, 1.0);
 
-                  gl_FragColor.rgb = vec3(gray);
+                  // 6. Feature color tint — only on actual model, not background
+                  vec3 grayVec = vec3(gray);
+                  
+                  #if APPLY_FEATURE_COLOR == 1
+                    // Subtle hue across entire model (darks get more color, brights less)
+                    float darkMask = 1.0 - smoothstep(0.1, 0.85, gray);
+                    vec3 tinted = mix(grayVec, grayVec * featureColor * 2.15, darkMask * 0.6);
+                    
+                    // Spread from random origin
+                    float dist = length(vWorldPos - featureOrigin);
+                    float spreadRadius = featureIntensity * 80.0;
+                    float spreadMask = 1.0 - smoothstep(spreadRadius * 0.6, spreadRadius, dist);
+                    
+                    gl_FragColor.rgb = mix(grayVec, tinted, spreadMask * featureIntensity);
+                  #else
+                    // Background/radiant — stay grayscale only
+                    gl_FragColor.rgb = grayVec;
+                  #endif
                   `
                 );
               };
@@ -196,16 +248,13 @@ export class ThreeBackground {
 
     // Tick animation mixer
     if (this.mixer) {
-      this.mixer.update(delta);
+      this.mixer.update(delta*3);
     }
 
-    // Camera animation disabled — using fixed position
-    // if (this.animateCamera) {
-    //   const elapsed = this.clock.getElapsedTime();
-    //   this.camera.position.x = 12.0 + Math.sin(elapsed * 0.08) * 1.5;
-    //   this.camera.position.y = 18.5 + Math.sin(elapsed * 0.05) * 0.5;
-    //   this.camera.lookAt(0, 0, 0);
-    // }
+    // Smooth transition for feature color tinting
+    const lerpSpeed = 2.0 * delta; // Smooth ~0.5s transition
+    this.featureIntensityUniform.value += (this.targetIntensity - this.featureIntensityUniform.value) * Math.min(lerpSpeed, 1);
+    this.featureColorUniform.value.lerp(this.targetColor, Math.min(lerpSpeed, 1));
 
     this.renderer.render(this.scene, this.camera);
   };
@@ -218,6 +267,29 @@ export class ThreeBackground {
 
   private syncSize(): void {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  /** Tint the 3D model with the feature's cardback color, spreading from random origin */
+  setFeatureColor(featureType: string): void {
+    const color = FEATURE_COLORS[featureType];
+    if (color) {
+      this.targetColor = color.clone();
+      this.targetIntensity = 1.0;
+      
+      // Pick random origin point on the model for spread effect
+      const rx = (Math.random() - 0.5) * 40;
+      const ry = (Math.random() - 0.5) * 40;
+      const rz = (Math.random() - 0.5) * 20;
+      this.featureOriginUniform.value.set(rx, ry, rz);
+      
+      console.log(`🎨 3D model tinting: ${featureType} from origin (${rx.toFixed(1)}, ${ry.toFixed(1)}, ${rz.toFixed(1)})`);
+    }
+  }
+
+  /** Return model to grayscale */
+  clearFeatureColor(): void {
+    this.targetIntensity = 0.0;
+    console.log('🎨 3D model returning to grayscale');
   }
 
   dispose(): void {

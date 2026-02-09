@@ -53,13 +53,14 @@ function wait(ms: number): Promise<void> {
 //    Hide Cups → Reveal Initial Multipliers → Collection Loop → Payout
 // ═══════════════════════════════════════════════════════════════
 export class CupsRevealAnimation {
-  private overlay: Container;
+  private scrollLayer: Container;     // Behind — scrolling filler
+  private multiplierLayer: Container; // Front — actual multipliers, lives, win display
   private dimGraphic: Graphics;
-  private multiplierContainers: Map<string, Container> = new Map(); // Container with cup sprite + text
+  private multiplierContainers: Map<string, Container> = new Map();
   private livesText: Text | null = null;
   private rng: RNG;
-  private skipRequested: boolean = false; // Flag for skip request
-  private currentSpinResolve: (() => void) | null = null; // Resolver for current spin
+  private skipRequested: boolean = false;
+  private currentSpinResolve: (() => void) | null = null;
 
   constructor(
     private parent: Container,
@@ -71,7 +72,8 @@ export class CupsRevealAnimation {
     private rows: number,
     seed: number
   ) {
-    this.overlay = new Container();
+    this.scrollLayer = new Container();
+    this.multiplierLayer = new Container();
     this.dimGraphic = new Graphics();
     this.rng = new RNG(seed);
   }
@@ -84,6 +86,14 @@ export class CupsRevealAnimation {
     return 0x9400D3;                      // Purple (100-500x)
   }
 
+  // ── Get font size based on multiplier value ─────────────
+  private getMultiplierFontSize(value: number): number {
+    if (value < 10) return 30;
+    if (value < 50) return 35;
+    if (value < 100) return 50;
+    return 60;
+  }
+
   // ── Public entry point ────────────────────────────────────
   async play(
     feature: FeatureTrigger,
@@ -94,8 +104,9 @@ export class CupsRevealAnimation {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
 
-    // Mount overlay layers onto parent (GridView)
-    this.parent.addChild(this.overlay);
+    // Mount layers: scroll behind, multipliers in front
+    this.parent.addChild(this.scrollLayer);
+    this.parent.addChild(this.multiplierLayer);
 
     try {
       // Phase 1 — Hide Cups columns
@@ -326,7 +337,7 @@ export class CupsRevealAnimation {
     const container = new Container();
     container.x = cx;
     container.y = cy - step * 2; // Start 2 rows above
-    this.overlay.addChild(container);
+    this.multiplierLayer.addChild(container);
 
     // Create cup sprite
     const cupTexture = this.assetLoader.getTexture('CUP');
@@ -349,8 +360,8 @@ export class CupsRevealAnimation {
       text: `×${value}`,
       style: new TextStyle({
         fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 28,
-        fill: 0xFFFFFF,
+        fontSize: this.getMultiplierFontSize(value),
+        fill: this.getMultiplierColor(value),
         stroke: { color: 0x000000, width: 4 },
         dropShadow: {
           color: 0x000000,
@@ -377,7 +388,6 @@ export class CupsRevealAnimation {
     container.y = cy; // Snap to final position
   }
 
-
   // ── Spawn multiplier (cup + text) with pop-in animation ──
   private async spawnMultiplierText(
     col: number,
@@ -394,7 +404,7 @@ export class CupsRevealAnimation {
     container.y = cy;
     container.scale.set(0);
     container.alpha = 0;
-    this.overlay.addChild(container);
+    this.multiplierLayer.addChild(container);
 
     // Create cup sprite
     const cupTexture = this.assetLoader.getTexture('CUP');
@@ -417,8 +427,8 @@ export class CupsRevealAnimation {
       text: `×${value}`,
       style: new TextStyle({
         fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 28,
-        fill: 0xFFFFFF,
+        fontSize: this.getMultiplierFontSize(value),
+        fill: this.getMultiplierColor(value),
         stroke: { color: 0x000000, width: 4 },
         dropShadow: {
           color: 0x000000,
@@ -482,7 +492,7 @@ export class CupsRevealAnimation {
         text: `${oldValue}×${multiplierUsed}`,
         style: new TextStyle({
           fontFamily: 'CustomFont, Arial, sans-serif',
-          fontSize: 20,
+          fontSize: 40,
           fill: 0xFFFF00, // Bright yellow
           stroke: { color: 0x000000, width: 3 },
           dropShadow: {
@@ -493,16 +503,16 @@ export class CupsRevealAnimation {
           },
         }),
       });
-      popupText.anchor.set(0, 0);
-      popupText.x = container.x + this.cellSize * 0.25; // Top-right corner
-      popupText.y = container.y - this.cellSize * 0.35;
+      popupText.anchor.set(0.5);
+      popupText.x = container.x; 
+      popupText.y = container.y;
       popupText.alpha = 0;
-      this.overlay.addChild(popupText);
+      this.multiplierLayer.addChild(popupText);
 
       // Fade in popup
       await tween(300, (t) => {
         popupText.alpha = t;
-        popupText.y = (container.y - this.cellSize * 0.35) - t * 10; // Float up slightly
+        popupText.y = container.y; // Float up slightly
       }, easeOutCubic);
 
       await wait(400); // Hold popup visible
@@ -511,15 +521,17 @@ export class CupsRevealAnimation {
       tween(300, (t) => {
         popupText.alpha = 1 - t;
       }, easeOutCubic).then(() => {
-        this.overlay.removeChild(popupText);
+        this.multiplierLayer.removeChild(popupText);
       });
 
-      // Phase 3: Update cup color and text value (while popup is fading)
+      // Phase 3: Update cup color, text value, font size and color (while popup is fading)
       if (cupSprite) {
         cupSprite.tint = this.getMultiplierColor(newValue);
       }
       if (text) {
         text.text = `×${newValue}`;
+        text.style.fontSize = this.getMultiplierFontSize(newValue);
+        text.style.fill = this.getMultiplierColor(newValue);
       }
 
       // Phase 4: Fade in cup with big pulse
@@ -555,8 +567,8 @@ export class CupsRevealAnimation {
     });
     this.livesText.anchor.set(0.5, 0);
     this.livesText.x = totalWidth / 2;
-    this.livesText.y = -50;
-    this.overlay.addChild(this.livesText);
+    this.livesText.y = -110;
+    this.multiplierLayer.addChild(this.livesText);
   }
 
   // ── Update lives display ─────────────────────────────────
@@ -593,9 +605,8 @@ export class CupsRevealAnimation {
       return; // Skip entire animation
     }
     
-    const multiplierPool = [2, 3, 5, 10];
     const fillerCount = 20; // Number of rows scrolling past
-    const showMultiplierChance = 0.4; // 40% chance to show multiplier in filler
+    const showMultiplierChance = 0.25; // 40% chance to show multiplier in filler
     
     // Create mask for grid area (same as ReelSpinner mask)
     const maskHeight = this.rows * this.cellSize + (this.rows - 1) * this.padding;
@@ -613,45 +624,67 @@ export class CupsRevealAnimation {
       const maskGraphic = new Graphics();
       maskGraphic.rect(col * step, 0, this.cellSize, maskHeight);
       maskGraphic.fill({ color: 0xffffff });
-      this.overlay.addChild(maskGraphic);
+      this.scrollLayer.addChild(maskGraphic);
       masks.push(maskGraphic);
       
       container.mask = maskGraphic;
-      this.overlay.addChild(container);
+      this.scrollLayer.addChild(container);
       scrollingContainers.push(container);
       
-      // Build vertical strip with EMPTY and MULTIPLIER cells mixed
+      // Build vertical strip with EMPTY and CUP+MULTIPLIER cells mixed
+      const fillerMultiplierPool = [1, 2, 3, 5, 10, 15, 20, 25, 30, 50, 75, 100, 150, 200, 250, 300, 400, 500];
+      
       for (let i = 0; i < fillerCount; i++) {
-        // 40% chance to show multiplier, 60% empty
+        // 40% chance to show cup+multiplier, 60% empty
         if (this.rng.nextFloat() < showMultiplierChance) {
-          const value = this.rng.choice(multiplierPool);
+          const value = this.rng.choice(fillerMultiplierPool);
+          
+          // Create container for cup + text (same as real multipliers)
+          const cellContainer = new Container();
+          cellContainer.x = this.cellSize / 2;
+          cellContainer.y = -i * step + this.cellSize / 2;
+      
+          
+          // Cup sprite
+          const cupTexture = this.assetLoader.getTexture('CUP');
+          if (cupTexture) {
+            const cupSprite = new Sprite(cupTexture);
+            cupSprite.anchor.set(0.5);
+            cupSprite.width = this.cellSize * 0.8;
+            cupSprite.height = this.cellSize * 0.8;
+            cupSprite.tint = this.getMultiplierColor(value);
+            cellContainer.addChild(cupSprite);
+          }
+          
+          // Multiplier text at bottom
           const text = new Text({
             text: `×${value}`,
             style: {
               fontFamily: 'CustomFont, Arial, sans-serif',
-              fontSize: 48,
-              fill: 0xFFD700,
-              stroke: { color: 0x000000, width: 5 },
+              fontSize: this.getMultiplierFontSize(value),
+              fill: this.getMultiplierColor(value),
+              stroke: { color: 0x000000, width: 4 },
               dropShadow: {
                 color: 0x000000,
-                blur: 6,
-                distance: 3,
-                alpha: 0.8,
+                blur: 4,
+                distance: 2,
+                alpha: 0.9,
               },
             },
           });
-          text.anchor.set(0.5);
-          text.x = this.cellSize / 2;
-          text.y = -i * step + this.cellSize / 2; // Start above, scroll DOWN
-          text.alpha = 0.5; // Faded to indicate filler
-          container.addChild(text);
+          text.anchor.set(0.5, 0);
+          text.x = 0;
+          text.y = this.cellSize * 0.25;
+          cellContainer.addChild(text);
+          
+          container.addChild(cellContainer);
         }
-        // Else: empty row (no text added)
+        // Else: empty row (no cup added)
       }
     }
     
     // Phase 2: Fast scroll DOWN (like normal reels falling)
-    const scrollDuration = this.skipRequested ? 200 : 1000;
+    const scrollDuration = this.skipRequested ? 240 : 1800; // 20% slower
     const targetScroll = fillerCount * step; // Total scroll distance
     
     let scrollOffset = 0;
@@ -692,11 +725,11 @@ export class CupsRevealAnimation {
     scrollingContainers.forEach((container, idx) => {
       container.mask = null;
       container.removeChildren();
-      this.overlay.removeChild(container);
+      this.scrollLayer.removeChild(container);
       
       // Remove mask
       masks[idx].clear();
-      this.overlay.removeChild(masks[idx]);
+      this.scrollLayer.removeChild(masks[idx]);
     });
     
     this.skipRequested = false;
@@ -713,7 +746,7 @@ export class CupsRevealAnimation {
     this.dimGraphic.clear();
     this.dimGraphic.rect(0, 0, tw, th);
     this.dimGraphic.fill({ color: 0x000000, alpha: 0.6 });
-    this.overlay.addChild(this.dimGraphic);
+    this.multiplierLayer.addChild(this.dimGraphic);
 
     // Create multiplier display
     const multiplierText = new Text({
@@ -735,7 +768,7 @@ export class CupsRevealAnimation {
     multiplierText.x = tw / 2;
     multiplierText.y = th / 2 - 40;
     multiplierText.alpha = 0;
-    this.overlay.addChild(multiplierText);
+    this.multiplierLayer.addChild(multiplierText);
 
     // Create payout display
     const payoutText = new Text({
@@ -758,10 +791,10 @@ export class CupsRevealAnimation {
     payoutText.y = th / 2 + 40;
     payoutText.alpha = 0;
     payoutText.scale.set(0.8);
-    this.overlay.addChild(payoutText);
+    this.multiplierLayer.addChild(payoutText);
 
     // Fade in multiplier
-    await tween(400, (t) => {
+    await tween(900, (t) => {
       multiplierText.alpha = t;
     }, easeOutCubic);
 
@@ -802,7 +835,7 @@ export class CupsRevealAnimation {
       this.dimGraphic.rect(0, 0, tw, th);
       this.dimGraphic.fill({ color: 0x000000, alpha: 0.6 * (1 - t) });
 
-      this.overlay.children.forEach((child) => {
+      this.multiplierLayer.children.forEach((child) => {
         if (child instanceof Text) {
           child.alpha = 1 - t;
         }
@@ -812,8 +845,10 @@ export class CupsRevealAnimation {
 
   // ── Tear down all temporary display objects ──────────────
   private cleanup(): void {
-    this.parent.removeChild(this.overlay);
-    this.overlay.removeChildren();
+    this.parent.removeChild(this.scrollLayer);
+    this.parent.removeChild(this.multiplierLayer);
+    this.scrollLayer.removeChildren();
+    this.multiplierLayer.removeChildren();
     this.dimGraphic.clear();
     this.multiplierContainers.clear();
 

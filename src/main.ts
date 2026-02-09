@@ -107,7 +107,7 @@ async function init() {
     if (DEBUG.BG_ENABLED) {
       const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
       if (threeCanvas) {
-        new ThreeBackground({
+        threeBg = new ThreeBackground({
           canvas: threeCanvas,
           modelPath: '/assets/3d/free_game_character_-the_ancient_woman_titan.glb',
           animate: DEBUG.BG_ANIMATE_CAMERA,
@@ -136,6 +136,7 @@ const SAFETY_TIMEOUT_MS = 10000;
 let hasSpunOnce: boolean = false; // Track if any spin has happened
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
 let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
+let threeBg: ThreeBackground | null = null; // Reference to 3D background
 
 function resetState() {
   currentState = SpinState.IDLE;
@@ -208,6 +209,7 @@ async function handleSpin() {
     // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
       spinBtn.disabled = true; // Lock button during reveal
+      threeBg?.setFeatureColor('T_FOOL');
 
       const foolReveal = new FoolRevealAnimation(
         gridView,
@@ -228,12 +230,14 @@ async function handleSpin() {
         spinOutput.totalWin,
         gameController.betAmount
       );
+      threeBg?.clearFeatureColor();
     }
 
     // ── Phase 2b: If a Cups feature triggered, play the multiplier collection animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_CUPS' && spinOutput.cupsResult) {
       spinBtn.disabled = false; // Allow clicking to speed up Cups spins
       cupsFeatureActive = true; // Mark Cups as active
+      threeBg?.setFeatureColor('T_CUPS');
 
       const cupsReveal = new CupsRevealAnimation(
         gridView,
@@ -257,6 +261,12 @@ async function handleSpin() {
       // Cups feature finished
       cupsFeatureActive = false;
       currentCupsAnimation = null;
+      threeBg?.clearFeatureColor();
+
+      // Restore all reel columns to visible
+      for (let col = 0; col < gridView.getCols(); col++) {
+        gridView.getReelSpinners()[col].setColumnVisible(true);
+      }
 
       // Update balance with Cups payout
       gameController.balance += cupsPayout;
@@ -268,8 +278,13 @@ async function handleSpin() {
     await showResults();
   } catch (error) {
     console.error('❌ Spin error:', error);
+    // Ensure reels are visible on error too
+    for (let col = 0; col < gridView.getCols(); col++) {
+      gridView.getReelSpinners()[col].setColumnVisible(true);
+    }
   }
   resetState();
+  spinBtn.disabled = false;
 }
 
 async function showResults() {

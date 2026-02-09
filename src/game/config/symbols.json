@@ -100,7 +100,7 @@
       "id": "T_CUPS",
       "tier": "TAROT",
       "filename": "T_CUPS.jpg",
-      "baseWeight": 0,
+      "baseWeight": 10,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
