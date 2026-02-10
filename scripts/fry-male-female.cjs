@@ -47,11 +47,9 @@ function rimLightSVG(w, h) {
   </svg>`);
 }
 
-async function frySymbol(filename) {
-  const SRC = path.join(SYMBOLS_ORIGINAL, filename);
-  const OUT = path.join(SYMBOLS_OUT, filename);
-
-  console.log(`\n── Processing ${filename} ──`);
+async function frySymbolTo(SRC, OUT) {
+  const filename = path.basename(SRC);
+  console.log(`\n── Processing ${filename} → ${path.basename(OUT)} ──`);
 
   if (!fs.existsSync(SRC)) {
     console.error(`❌ Source not found: ${SRC}`);
@@ -206,15 +204,61 @@ async function frySymbol(filename) {
   console.log(`✅ Created: ${OUT}`);
 }
 
+async function frySymbol(filename) {
+  const SRC = path.join(SYMBOLS_ORIGINAL, filename);
+  const OUT = path.join(SYMBOLS_OUT, filename);
+  await frySymbolTo(SRC, OUT);
+}
+
 async function main() {
-  console.log('╔══════════════════════════════════════╗');
-  console.log('║   Fry male.png & female.png          ║');
-  console.log('╚══════════════════════════════════════╝');
+  console.log('╔══════════════════════════════════════════════╗');
+  console.log('║   Fry male.png, female.png & mystery.png     ║');
+  console.log('╚══════════════════════════════════════════════╝');
 
   await frySymbol('male.png');
   await frySymbol('female.png');
+  // Fry mystery.png, then add a weak purple glow background
+  const mysterySrc = path.join(SYMBOLS_ORIGINAL, 'mystery.png');
+  const mysteryDst = path.join(SYMBOLS_OUT, 'MYSTERY.png');
+  if (fs.existsSync(mysterySrc)) {
+    await frySymbolTo(mysterySrc, mysteryDst);
 
-  console.log('\n✅ Done! male.png and female.png have been fried.');
+    // Post-process: replace white background with solid purple glow
+    const friedMeta = await sharp(mysteryDst).metadata();
+    const mw = friedMeta.width;
+    const mh = friedMeta.height;
+
+    // Solid purple background with radial glow
+    const purpleBg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${mw}" height="${mh}">
+      <rect width="${mw}" height="${mh}" fill="#2a1050"/>
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="50%" r="70%">
+          <stop offset="0%"   stop-color="#c084fc" stop-opacity="0.4"/>
+          <stop offset="50%"  stop-color="#7c3aed" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="#2a1050" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="${mw}" height="${mh}" fill="url(#glow)"/>
+    </svg>`);
+
+    const bgLayer = await sharp(purpleBg).resize(mw, mh).png().toBuffer();
+
+    // Composite: purple bg underneath, fried symbol on top (multiply to let bg show through whites)
+    await sharp(bgLayer)
+      .composite([
+        { input: await sharp(mysteryDst).toBuffer(), blend: 'multiply', top: 0, left: 0 },
+      ])
+      .png()
+      .toFile(mysteryDst + '.tmp');
+
+    // Replace original with tinted version
+    fs.renameSync(mysteryDst + '.tmp', mysteryDst);
+    console.log(`  ✓ Applied weak purple glow to MYSTERY.png`);
+  } else {
+    console.error('❌ mystery.png not found in symbols_original');
+  }
+
+  console.log('\n✅ Done! male.png, female.png, and mystery.png have been fried.');
 }
 
 main().catch(err => { console.error('❌ Error:', err); process.exit(1); });

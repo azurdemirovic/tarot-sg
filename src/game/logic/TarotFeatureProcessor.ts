@@ -33,6 +33,20 @@ export interface LoversResult {
   currentSpin: LoversSpinResult | null;  // result of the current spin's selection
 }
 
+export interface PriestessResult {
+  spinsTotal: number;            // 6 (2 Priestess) or 9 (3+ Priestess)
+  spinsRemaining: number;
+  multiplier: number;            // 1 (2 Priestess) or 2 (3+ Priestess)
+  columns: number[];             // triggering Priestess columns
+}
+
+export interface PriestessSpinResult {
+  mysteryCells: { col: number; row: number }[];      // ALL mystery cells (new + persistent)
+  newMysteryCells: { col: number; row: number }[];   // only the NEW cells added this spin
+  mysterySymbolId: string;                            // the symbol all mysteries resolve to
+  transformedGrid: Grid;                              // grid after mystery reveal
+}
+
 export class TarotFeatureProcessor {
   constructor(
     private rng: RNG,
@@ -302,6 +316,106 @@ export class TarotFeatureProcessor {
 
     return { malePos, femalePos };
   }
+
+  // ─── HIGH PRIESTESS ──────────────────────────────────────────────
+
+  /**
+   * Apply the Priestess feature (initial trigger).
+   * Determines spin count and multiplier. Does NOT reveal anything yet.
+   *
+   * 2 Priestess → 6 spins, ×1 multiplier
+   * 3+ Priestess → 9 spins, ×2 multiplier
+   */
+  applyPriestess(_grid: Grid, trigger: FeatureTrigger): PriestessResult {
+    const spinsTotal = trigger.count >= 3 ? 9 : 6;
+    const multiplier = trigger.count >= 3 ? 2 : 1;
+
+    console.log(`🔮 Priestess Feature: ${trigger.count} Priestess → ${spinsTotal} spins, ×${multiplier}`);
+
+    return {
+      spinsTotal,
+      spinsRemaining: spinsTotal,
+      multiplier,
+      columns: [...trigger.columns],
+    };
+  }
+
+  /**
+   * Apply a single Priestess spin: place mystery covers, pick mystery symbol, reveal.
+   *
+   * 1. Roll mystery cover count: 1 (common), 2 (rare), 3 (very rare)
+   * 2. Place covers on random cells not already occupied by persistent mysteries
+   * 3. Roll one Mystery Symbol (weighted from all normal symbols)
+   * 4. All covered cells become the mystery symbol
+   * 5. Return result with positions + symbol for animation
+   */
+  applyPriestessSpin(
+    grid: Grid,
+    priestessResult: PriestessResult,
+    existingMysteryCells?: { col: number; row: number }[]
+  ): PriestessSpinResult {
+    const rows = grid[0].length;
+    const cols = grid.length;
+
+    // 1. Roll mystery cover count — weighted: 1 common, 2 rare, 3 very rare
+    // Weights: 1→70%, 2→22%, 3→8%
+    const countRoll = this.rng.nextFloat();
+    let coverCount: number;
+    if (countRoll < 0.70) coverCount = 1;
+    else if (countRoll < 0.92) coverCount = 2;
+    else coverCount = 3;
+
+    // 2. Select random cells that aren't already persistent mystery cells
+    const occupiedSet = new Set(
+      (existingMysteryCells ?? []).map(c => `${c.col},${c.row}`)
+    );
+    const availableCells: { col: number; row: number }[] = [];
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        if (!occupiedSet.has(`${c},${r}`)) {
+          availableCells.push({ col: c, row: r });
+        }
+      }
+    }
+    this.rng.shuffle(availableCells);
+    const newMysteryCells = availableCells.slice(0, Math.min(coverCount, availableCells.length));
+
+    // Combine new + existing mystery cells
+    const allMysteryCells = [...(existingMysteryCells ?? []), ...newMysteryCells];
+
+    // 3. Roll mystery symbol from weighted table (all normal symbols eligible)
+    const normalSymbols = this.assetLoader.getNormalSymbols();
+    const weights = normalSymbols.map(s => s.baseWeight);
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    let symbolRoll = this.rng.nextFloat() * totalWeight;
+    let mysterySymbolId = normalSymbols[0].id;
+    for (let i = 0; i < normalSymbols.length; i++) {
+      symbolRoll -= weights[i];
+      if (symbolRoll <= 0) {
+        mysterySymbolId = normalSymbols[i].id;
+        break;
+      }
+    }
+
+    // 4. Set ALL mystery cells (new + persistent) to the chosen symbol
+    for (const cell of allMysteryCells) {
+      grid[cell.col][cell.row] = { col: cell.col, row: cell.row, symbolId: mysterySymbolId };
+    }
+
+    // 5. Decrement spins
+    priestessResult.spinsRemaining--;
+
+    console.log(`🔮 Priestess Spin: +${newMysteryCells.length} new mystery (${allMysteryCells.length} total) → all reveal "${mysterySymbolId}", ${priestessResult.spinsRemaining} spins left`);
+
+    return {
+      mysteryCells: allMysteryCells,
+      newMysteryCells,
+      mysterySymbolId,
+      transformedGrid: grid,
+    };
+  }
+
+  // ─── LOVERS ────────────────────────────────────────────────────
 
   /**
    * Apply a Lovers per-spin selection (after player picks a card).

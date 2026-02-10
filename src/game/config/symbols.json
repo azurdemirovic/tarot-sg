@@ -124,7 +124,7 @@
       "id": "T_LOVERS",
       "tier": "TAROT",
       "filename": "T_LOVERS.jpg",
-      "baseWeight": 30,
+      "baseWeight": 0,
       "payValues": [0, 0, 20, 40, 100],
       "isTarot": true
     },
@@ -132,7 +132,7 @@
       "id": "T_PRIESTESS",
       "tier": "TAROT",
       "filename": "T_PRIESTESS.jpg",
-      "baseWeight": 0,
+      "baseWeight": 10,
       "payValues": [0, 0, 30, 60, 150],
       "isTarot": true
     },

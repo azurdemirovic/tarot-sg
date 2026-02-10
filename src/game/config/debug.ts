@@ -19,8 +19,14 @@ export const DEBUG = {
   CUPS_COLUMNS: [1, 3],
 
   /** Force Lovers feature on next spin (for testing) */
-  FORCE_LOVERS: true,
+  FORCE_LOVERS: false,
 
   /** Columns to place Lovers cards (2 or 3 columns) */
   LOVERS_COLUMNS: [1, 3],
+
+  /** Force Priestess feature on next spin (for testing) */
+  FORCE_PRIESTESS: false,
+
+  /** Columns to place Priestess cards (2 or 3 columns) */
+  PRIESTESS_COLUMNS: [1, 3],
 };

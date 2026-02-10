@@ -2,7 +2,7 @@ import { RNG } from './RNG';
 import { AssetLoader } from './AssetLoader';
 import { SpinGenerator } from './logic/SpinGenerator';
 import { PaylineEvaluator } from './logic/PaylineEvaluator';
-import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult } from './logic/TarotFeatureProcessor';
+import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult, PriestessResult, PriestessSpinResult } from './logic/TarotFeatureProcessor';
 import { Grid, TarotColumn, FeatureTrigger, GameMode, WinLine } from './Types';
 
 export interface SpinOutput {
@@ -17,6 +17,8 @@ export interface SpinOutput {
   cupsResult: CupsResult | null;
   /** If Lovers triggered, details of the bond fill */
   loversResult: LoversResult | null;
+  /** If Priestess triggered, details of the mystery mode */
+  priestessResult: PriestessResult | null;
   /** The final grid used for payline evaluation (after feature, if any) */
   finalGrid: Grid;
   wins: WinLine[];
@@ -83,6 +85,7 @@ export class GameController {
     let foolResult: FoolResult | null = null;
     let cupsResult: CupsResult | null = null;
     let loversResult: LoversResult | null = null;
+    let priestessResult: PriestessResult | null = null;
     let multiplier = 1;
 
     if (feature) {
@@ -97,13 +100,17 @@ export class GameController {
         loversResult = this.featureProcessor.applyLovers(finalGrid, feature);
         multiplier = loversResult.multiplier;
         // Grid is NOT filled yet — deferred until player picks a card
+      } else if (feature.type === 'T_PRIESTESS') {
+        priestessResult = this.featureProcessor.applyPriestess(finalGrid, feature);
+        multiplier = priestessResult.multiplier;
+        // Grid is NOT transformed yet — deferred to per-spin mystery reveal
       }
-      // Other features (Priestess, Death) → future implementation
+      // Other features (Death) → future implementation
     }
 
     // ── Phase 3: evaluate paylines on the *final* grid ──
-    // Skip evaluation for Lovers — grid isn't filled until player picks
-    const wins = (feature?.type === 'T_LOVERS')
+    // Skip evaluation for Lovers/Priestess — grid transforms are deferred
+    const wins = (feature?.type === 'T_LOVERS' || feature?.type === 'T_PRIESTESS')
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
@@ -111,7 +118,7 @@ export class GameController {
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    if (feature?.type !== 'T_LOVERS') {
+    if (feature?.type !== 'T_LOVERS' && feature?.type !== 'T_PRIESTESS') {
       this.balance += totalWin;
     }
 
@@ -138,6 +145,7 @@ export class GameController {
       foolResult,
       cupsResult,
       loversResult,
+      priestessResult,
       finalGrid,
       wins,
       totalWin,
@@ -153,6 +161,7 @@ export class GameController {
       foolResult: null,
       cupsResult: null,
       loversResult: null,
+      priestessResult: null,
       finalGrid: this.currentGrid!,
       wins: this.lastWins,
       totalWin: this.lastWin,
@@ -177,6 +186,7 @@ export class GameController {
     let foolResult: FoolResult | null = null;
     let cupsResult: CupsResult | null = null;
     let loversResult: LoversResult | null = null;
+    let priestessResult: PriestessResult | null = null;
     let multiplier = 1;
 
     if (feature && feature.type === 'T_FOOL') {
@@ -187,11 +197,13 @@ export class GameController {
     } else if (feature && feature.type === 'T_LOVERS') {
       loversResult = this.featureProcessor.applyLovers(finalGrid, feature);
       multiplier = loversResult.multiplier;
-      // Grid is NOT filled yet — deferred until player picks a card
+    } else if (feature && feature.type === 'T_PRIESTESS') {
+      priestessResult = this.featureProcessor.applyPriestess(finalGrid, feature);
+      multiplier = priestessResult.multiplier;
     }
 
-    // Skip evaluation for Lovers — grid isn't filled until player picks
-    const wins = (feature?.type === 'T_LOVERS')
+    // Skip evaluation for Lovers/Priestess — grid transforms are deferred
+    const wins = (feature?.type === 'T_LOVERS' || feature?.type === 'T_PRIESTESS')
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
@@ -199,13 +211,13 @@ export class GameController {
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    if (feature?.type !== 'T_LOVERS') {
+    if (feature?.type !== 'T_LOVERS' && feature?.type !== 'T_PRIESTESS') {
       this.balance += totalWin;
     }
 
     this.isSpinning = false;
 
-    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, loversResult, finalGrid, wins, totalWin, multiplier };
+    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, loversResult, priestessResult, finalGrid, wins, totalWin, multiplier };
   }
 
   /**
@@ -282,6 +294,37 @@ export class GameController {
     const { grid } = this.spinGenerator.generateSpin(5, 3, 0); // 0 tarot chance
     this.currentGrid = grid;
     return grid.map(col => col.map(cell => ({ ...cell }))); // deep clone
+  }
+
+  /**
+   * Apply a single Priestess spin: place mystery covers, pick symbol, reveal.
+   * Called per-spin during the Priestess multi-spin feature.
+   * Balance is NOT updated here — only tracked. Total payout is applied at the end in main.ts.
+   */
+  applyPriestessSpin(
+    grid: Grid,
+    priestessResult: PriestessResult,
+    existingMysteryCells?: { col: number; row: number }[]
+  ): { spinResult: PriestessSpinResult; wins: WinLine[]; totalWin: number; multiplier: number } {
+    this.paylineEvaluator.currentBetAmount = this.betAmount;
+
+    const spinResult = this.featureProcessor.applyPriestessSpin(grid, priestessResult, existingMysteryCells);
+
+    // Evaluate paylines on the transformed grid
+    const wins = this.paylineEvaluator.evaluateAllPaylines(grid);
+    const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
+    const multiplier = priestessResult.multiplier;
+    const totalWin = baseWin * multiplier;
+
+    this.lastWins = wins;
+    this.lastWin = totalWin;
+    // NOTE: Balance is NOT updated here — total payout applied at feature end
+
+    if (wins.length > 0) {
+      console.log(`🔮 Priestess Spin ${priestessResult.spinsTotal - priestessResult.spinsRemaining}/${priestessResult.spinsTotal}: ${wins.length} Win(s), Total: ${totalWin.toFixed(4)} EUR`);
+    }
+
+    return { spinResult, wins, totalWin, multiplier };
   }
 
   getSeed(): number { return this.rng.getState(); }

@@ -50,6 +50,15 @@ export class AssetLoader {
       }
     }
 
+    // Load mystery symbol texture (used by Priestess feature)
+    try {
+      const mysteryTexture = await Assets.load('/assets/symbols/MYSTERY.png');
+      this.textures.set('MYSTERY', mysteryTexture);
+      console.log('✓ Loaded: MYSTERY');
+    } catch (error) {
+      console.error('✗ Failed to load MYSTERY:', error);
+    }
+
     console.log(`✅ Loaded ${this.textures.size} textures`);
   }
 
