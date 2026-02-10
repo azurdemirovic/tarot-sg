@@ -1,4 +1,4 @@
-import { Assets, Texture } from 'pixi.js';
+import { Assets, Texture, TextureSource } from 'pixi.js';
 import symbolsConfig from './config/symbols.json';
 import { SymbolsConfig } from './Types';
 
@@ -17,6 +17,9 @@ export class AssetLoader {
 
   async load(): Promise<void> {
     console.log('🎨 Loading assets...');
+
+    // Use linear (bilinear) filtering for smooth downscaling — avoids grainy look
+    TextureSource.defaultOptions.scaleMode = 'linear';
 
     // Load all symbol textures
     for (const symbol of this.config.symbols) {
@@ -67,8 +70,11 @@ export class AssetLoader {
     return this.config.symbols.filter(s => s.tier === tier);
   }
 
+  /** Symbols eligible for normal spins (excludes tarots and Lovers-only anchors) */
+  private static readonly LOVERS_ANCHOR_IDS = new Set(['MALE', 'FEMALE']);
+
   getNormalSymbols() {
-    return this.config.symbols.filter(s => !s.isTarot);
+    return this.config.symbols.filter(s => !s.isTarot && !AssetLoader.LOVERS_ANCHOR_IDS.has(s.id));
   }
 
   getTarotSymbols() {

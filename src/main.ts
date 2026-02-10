@@ -7,6 +7,7 @@ import { FoolRevealAnimation } from './game/render/FoolRevealAnimation';
 import { CupsRevealAnimation } from './game/render/CupsRevealAnimation';
 import { LoversRevealAnimation } from './game/render/LoversRevealAnimation';
 import { ThreeBackground } from './threeBackground';
+import { TarotTitleDisplay } from './game/render/TarotTitleDisplay';
 import { DEBUG } from './game/config/debug';
 
 // Initialize PixiJS Application
@@ -227,6 +228,12 @@ async function handleSpin() {
       await delay(300); // Brief pause to admire revealed tarots
     }
 
+    // ── Phase 1.75: Show tarot title card if a feature triggered ──
+    if (spinOutput.feature) {
+      const titleDisplay = new TarotTitleDisplay();
+      await titleDisplay.show(spinOutput.feature.type, 400, 1000, 400);
+    }
+
     // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
       spinBtn.disabled = true; // Lock button during reveal
@@ -239,7 +246,9 @@ async function handleSpin() {
         gridView.getCellSize(),
         gridView.getPadding(),
         gridView.getCols(),
-        gridView.getRows()
+        gridView.getRows(),
+        threeBg,
+        app.canvas as HTMLCanvasElement
       );
 
       await foolReveal.play(
@@ -268,7 +277,9 @@ async function handleSpin() {
         gridView.getPadding(),
         gridView.getCols(),
         gridView.getRows(),
-        gameController.getCurrentSeed()
+        gameController.getCurrentSeed(),
+        threeBg,
+        app.canvas as HTMLCanvasElement
       );
       
       currentCupsAnimation = cupsReveal; // Store reference for skip functionality
@@ -308,7 +319,10 @@ async function handleSpin() {
         gridView.getCellSize(),
         gridView.getPadding(),
         gridView.getCols(),
-        gridView.getRows()
+        gridView.getRows(),
+        gridView,
+        threeBg,
+        app.canvas as HTMLCanvasElement
       );
 
       const feature = spinOutput.feature;

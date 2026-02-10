@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { TarotTearEffect, TearScreenRect } from './game/render/TarotTearEffect';
 
 export interface ThreeBgOptions {
   canvas: HTMLCanvasElement;
@@ -25,8 +26,6 @@ export class ThreeBackground {
   private _animateCamera: boolean; // Reserved for future camera animation
   private animationId: number = 0;
   private mixer: THREE.AnimationMixer | null = null;
-  private bgTexture: THREE.Texture | null = null;
-  private scrollSpeed: number = 0.02; // vertical scroll speed (units per second)
   
   // Feature color tinting
   private featureColorUniform = { value: new THREE.Color(0, 0, 0) }; // Black = no color
@@ -34,6 +33,12 @@ export class ThreeBackground {
   private featureOriginUniform = { value: new THREE.Vector3(0, 0, 0) }; // Spread origin (model space)
   private targetIntensity: number = 0.0;
   private targetColor: THREE.Color = new THREE.Color(0, 0, 0);
+
+  // Active tear effects
+  private activeTearEffects: TarotTearEffect[] = [];
+
+  // FOND mesh (circular element to rotate on Z axis)
+  private fondMesh: THREE.Object3D | null = null;
 
   
   constructor(options: ThreeBgOptions) {
@@ -56,24 +61,6 @@ export class ThreeBackground {
     // ── Scene ──
     this.scene = new THREE.Scene();
 
-    // ── Scrolling background plane ──
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load('/assets/symbols_original/screen_blurred.jpg', (texture) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(1, 1);
-      this.bgTexture = texture;
-
-      // Large plane far behind everything, filling the view
-      const planeGeo = new THREE.PlaneGeometry(120, 120);
-      const planeMat = new THREE.MeshBasicMaterial({ map: texture });
-      const bgPlane = new THREE.Mesh(planeGeo, planeMat);
-      bgPlane.position.set(0, 0, -50); // far behind model
-      this.scene.add(bgPlane);
-
-      console.log('✅ Scrolling background loaded');
-    });
 
     // ── Camera ──
     const aspect = window.innerWidth / window.innerHeight;
@@ -81,16 +68,9 @@ export class ThreeBackground {
     this.camera.position.set(-4.5, 0.0, 36.5);
     this.camera.lookAt(0, 0, 0);
 
-    // ── Lighting: hard 50/50 split — one half lit, one half pure shadow ──
-    // Near-zero ambient so unlit side goes black
-    const ambient = new THREE.AmbientLight(0xffffff, 0.01);
+    // ── Lighting: even ambient only (directional key removed — was causing bright strip on right border) ──
+    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
     this.scene.add(ambient);
-
-    // Key light from pure left side (no forward wrap) — hard edge down the middle
-    const key = new THREE.DirectionalLight(0xffffff, 4.0);
-    key.position.set(-15, 2, 0); // pure side, slightly above
-    key.castShadow = false;
-    this.scene.add(key);
 
     // ── Background group ──
     this.bgGroup = new THREE.Group();
@@ -124,6 +104,18 @@ export class ThreeBackground {
 
         // Performance: frustum culling + desaturate to black & white
         model.traverse((child) => {
+          // Log all mesh names for debugging
+          if ((child as THREE.Mesh).isMesh) {
+            console.log(`📦 Mesh found: "${child.name}"`);
+          }
+
+          // Capture FOND mesh for Z-axis rotation (case-insensitive check)
+          if (child.name.toUpperCase().includes('FOND')) {
+            this.fondMesh = child;
+            child.position.y -= 200; // shift FOND mesh lower vertically
+            console.log(`🔄 Found FOND mesh: "${child.name}" — shifted down & will rotate on Z axis`);
+          }
+
           if ((child as THREE.Mesh).isMesh) {
             child.frustumCulled = true;
 
@@ -241,14 +233,14 @@ export class ThreeBackground {
 
     const delta = this.clock.getDelta();
 
-    // Scroll background texture vertically
-    if (this.bgTexture) {
-      this.bgTexture.offset.y += this.scrollSpeed * delta;
-    }
-
     // Tick animation mixer
     if (this.mixer) {
       this.mixer.update(delta*3);
+    }
+
+    // Rotate FOND mesh around Z axis
+    if (this.fondMesh) {
+      this.fondMesh.rotation.z += delta * 0.08; // slow steady spin
     }
 
     // Smooth transition for feature color tinting
@@ -292,9 +284,134 @@ export class ThreeBackground {
     console.log('🎨 3D model returning to grayscale');
   }
 
+  /**
+   * Play tear effects for multiple tarot columns simultaneously.
+   * Creates a temporary overlay canvas with its own Three.js renderer for the tear.
+   * @param columns - Array of { imagePath, screenRect } for each tarot column
+   * @param stagger - Delay in ms between each column tear (default 150)
+   */
+  async playTearEffects(
+    columns: { imagePath: string; screenRect: TearScreenRect }[],
+    stagger: number = 150,
+    clipRect?: { x: number; y: number; width: number; height: number },
+    onReady?: () => void
+  ): Promise<void> {
+    // Create a temporary overlay canvas for the tear effect
+    const tearCanvas = document.createElement('canvas');
+    tearCanvas.style.position = 'fixed';
+    tearCanvas.style.top = '0';
+    tearCanvas.style.left = '0';
+    tearCanvas.style.width = '100vw';
+    tearCanvas.style.height = '100vh';
+    tearCanvas.style.zIndex = '10'; // Above PixiJS canvas
+    tearCanvas.style.pointerEvents = 'none';
+
+    // Clip to grid area so the tear doesn't overlap the frame
+    if (clipRect) {
+      const left = clipRect.x;
+      const top = clipRect.y;
+      const right = clipRect.x + clipRect.width;
+      const bottom = clipRect.y + clipRect.height;
+      tearCanvas.style.clipPath = `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+    }
+
+    document.body.appendChild(tearCanvas);
+
+    // Create a dedicated renderer for the tear overlay
+    const tearRenderer = new THREE.WebGLRenderer({
+      canvas: tearCanvas,
+      antialias: true,
+      alpha: true, // Transparent background so only the tear is visible
+    });
+    tearRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    tearRenderer.setSize(window.innerWidth, window.innerHeight);
+    tearRenderer.setClearColor(0x000000, 0); // Fully transparent
+    tearRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    tearRenderer.toneMapping = THREE.NoToneMapping; // No tone mapping — texture is pre-styled
+
+    // Create a dedicated scene and camera for the tear
+    const tearScene = new THREE.Scene();
+    const aspect = window.innerWidth / window.innerHeight;
+    const tearCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 500);
+    tearCamera.position.set(0, 0, 10); // Simple front-facing camera
+    tearCamera.lookAt(0, 0, 0);
+
+    // Ambient light — kept low to match the muted engraved PixiJS style
+    const light = new THREE.AmbientLight(0xffffff, 1.0);
+    tearScene.add(light);
+
+    // Start a render loop for the tear scene
+    let tearAnimating = true;
+    const renderTear = () => {
+      if (!tearAnimating) return;
+      tearRenderer.render(tearScene, tearCamera);
+      requestAnimationFrame(renderTear);
+    };
+    requestAnimationFrame(renderTear);
+
+    try {
+      // 1. Create all effects and start loading textures in parallel
+      const effects: TarotTearEffect[] = [];
+      for (const col of columns) {
+        const effect = new TarotTearEffect(
+          tearScene,
+          tearCamera,
+          col.imagePath,
+          col.screenRect
+        );
+        effects.push(effect);
+        this.activeTearEffects.push(effect);
+      }
+
+      // 2. Wait for ALL textures to be loaded
+      await Promise.all(effects.map(e => e.ready));
+
+      // 3. Position all tear cards in the scene (so they're visible on next render)
+      for (const effect of effects) {
+        effect.setup();
+      }
+
+      // 4. Render one frame so the Three.js tear cards are on screen
+      tearRenderer.render(tearScene, tearCamera);
+
+      // 5. NOW swap the PixiJS symbols — Three.js cards are already covering them
+      if (onReady) onReady();
+
+      // 5. Play tear animations with stagger
+      const playPromises: Promise<void>[] = [];
+      for (let i = 0; i < effects.length; i++) {
+        const effect = effects[i];
+        const delayMs = i * stagger;
+
+        playPromises.push(
+          new Promise<void>(resolve => setTimeout(resolve, delayMs)).then(async () => {
+            try {
+              await effect.play();
+            } finally {
+              effect.dispose();
+              this.activeTearEffects = this.activeTearEffects.filter(e => e !== effect);
+            }
+          })
+        );
+      }
+
+      await Promise.all(playPromises);
+    } finally {
+      // Tear down the overlay
+      tearAnimating = false;
+      tearRenderer.dispose();
+      tearCanvas.remove();
+    }
+  }
+
   dispose(): void {
     cancelAnimationFrame(this.animationId);
     window.removeEventListener('resize', () => this.onResize());
+    // Clean up any active tear effects
+    for (const effect of this.activeTearEffects) {
+      effect.dispose();
+    }
+    this.activeTearEffects = [];
     this.renderer.dispose();
   }
 }

@@ -4,6 +4,8 @@ import { FeatureTrigger, Grid } from '../Types';
 import { FoolResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
 import { WinDisplay } from './WinDisplay';
+import { ThreeBackground } from '../../threeBackground';
+import { playTarotTearEffects } from './TearEffectHelper';
 
 // ─── Easing helpers ───────────────────────────────────────────
 function easeOutCubic(t: number): number {
@@ -70,7 +72,9 @@ export class FoolRevealAnimation {
     private cellSize: number,
     private padding: number,
     private cols: number,
-    private rows: number
+    private rows: number,
+    private threeBg: ThreeBackground | null = null,
+    private pixiCanvas: HTMLCanvasElement | null = null
   ) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
@@ -97,10 +101,10 @@ export class FoolRevealAnimation {
     this.overlay.addChild(this.particleContainer);
 
     try {
-      // Phase A — Hide Fool columns
-      await this.phaseHideFools(feature);
+      // Phase A — Tear away tarot cards (symbols already visible underneath)
+      await this.phaseHideFools(feature, finalGrid);
 
-      // Phase B — Sequential cell reveal  (~120 ms × cells)
+      // Phase B — Sequential cell reveal with pop-in animations
       await this.phaseReveal(feature, foolResult, finalGrid);
 
       // Phase C — Show win display (only if win > bet × 10)
@@ -159,102 +163,75 @@ export class FoolRevealAnimation {
     }
   }
 
-  // ── Phase A: Hide Fool Columns ───────────────────────────
-  private async phaseHideFools(feature: FeatureTrigger): Promise<void> {
-    // Simply hide the Fool tarot columns
+  // ── Phase A: Hide Fool Columns (with tear effect) ────────
+  private async phaseHideFools(feature: FeatureTrigger, finalGrid: Grid): Promise<void> {
+    // Build map of final symbols for each tarot column so they're visible under the tear
+    const finalSymbolIds = new Map<number, string[]>();
     for (const col of feature.columns) {
-      this.reelSpinners[col].setColumnVisible(false);
+      finalSymbolIds.set(col, finalGrid[col].map(cell => cell.symbolId));
+    }
+
+    if (this.threeBg && this.pixiCanvas) {
+      await playTarotTearEffects(
+        this.threeBg,
+        feature.columns,
+        feature.type,
+        this.reelSpinners,
+        this.cellSize,
+        this.padding,
+        this.rows,
+        this.pixiCanvas,
+        finalSymbolIds
+      );
+    } else {
+      // Fallback: set symbols directly
+      for (const col of feature.columns) {
+        this.reelSpinners[col].setSymbols(finalSymbolIds.get(col)!, false);
+        this.reelSpinners[col].setColumnVisible(true);
+      }
     }
   }
 
-  // ── Phase D: Sequential Cell Reveal ──────────────────────
+  // ── Phase D: Post-tear effects (WILD glows only) ─────────
+  // Symbols are already visible from the tear — no pop-in needed.
   private async phaseReveal(
     feature: FeatureTrigger,
     foolResult: FoolResult,
-    finalGrid: Grid
+    _finalGrid: Grid
   ): Promise<void> {
     const step = this.cellSize + this.padding;
 
-    // 1. Set the new symbols on each Fool column (still invisible)
-    const colSpriteData: {
-      col: number;
-      sprites: Sprite[];
-      targetScales: { x: number; y: number }[];
-    }[] = [];
-
+    // Ensure columns are visible
     for (const col of feature.columns) {
-      const symbolIds = finalGrid[col].map(cell => cell.symbolId);
-      this.reelSpinners[col].setSymbols(symbolIds, false);
       this.reelSpinners[col].setColumnVisible(true);
-
-      const sprites = this.reelSpinners[col].getVisibleSprites();
-      const targetScales = sprites.map(s => ({ x: s.scale.x, y: s.scale.y }));
-
-      // Start hidden
-      for (const s of sprites) {
-        s.scale.set(0);
-        s.alpha = 0;
-      }
-
-      colSpriteData.push({ col, sprites, targetScales });
     }
 
-    // 2. Build reveal order: columns left→right, rows top→bottom
+    // Spawn WILD glow effects with stagger
     const sortedCols = [...feature.columns].sort((a, b) => a - b);
-    const cellQueue: { col: number; row: number; isWild: boolean }[] = [];
+    const stagger = 100; // ms between glow spawns
+    const allDone: Promise<void>[] = [];
+    let idx = 0;
 
     for (const col of sortedCols) {
       for (let row = 0; row < this.rows; row++) {
         const isWild = foolResult.wildPlacements.some(
           wp => wp.col === col && wp.row === row
         );
-        cellQueue.push({ col, row, isWild });
+        if (isWild) {
+          const delayMs = idx * stagger;
+          allDone.push(
+            wait(delayMs).then(() => {
+              this.spawnWildGlow(col, row, step);
+            })
+          );
+          idx++;
+        }
       }
     }
 
-    // 3. Staggered reveal (20% slower)
-    const stagger = 144;  // ms between each cell (was 120, now 20% slower)
-    const popDuration = 420; // ms per cell pop-in (was 350, now 20% slower)
-
-    const allDone: Promise<void>[] = [];
-
-    for (let i = 0; i < cellQueue.length; i++) {
-      const cell = cellQueue[i];
-      const delayMs = i * stagger;
-
-      allDone.push(
-        wait(delayMs).then(async () => {
-          const data = colSpriteData.find(d => d.col === cell.col)!;
-          const sprite = data.sprites[cell.row];
-          const target = data.targetScales[cell.row];
-          if (!sprite || !target) return;
-
-          // WILD glow ring
-          if (cell.isWild) {
-            this.spawnWildGlow(cell.col, cell.row, step);
-          }
-
-          // Pop-in: scale 0 → 1.15 → 1.0 + quick alpha fade-in
-          await tween(popDuration, (t) => {
-            let s: number;
-            if (t < 0.55) {
-              s = easeOutBack(t / 0.55) * 1.12;
-            } else {
-              s = 1.12 - ((t - 0.55) / 0.45) * 0.12;
-            }
-
-            sprite.scale.set(target.x * s, target.y * s);
-            sprite.alpha = Math.min(1, t * 3);
-          }, easeOutCubic);
-
-          // Ensure exact target
-          sprite.scale.set(target.x, target.y);
-          sprite.alpha = 1;
-        })
-      );
-    }
-
     await Promise.all(allDone);
+    // Small pause after glows for visual clarity
+    if (allDone.length > 0) await wait(300);
   }
 
   // ── Spawn golden glow ring behind a WILD cell ────────────

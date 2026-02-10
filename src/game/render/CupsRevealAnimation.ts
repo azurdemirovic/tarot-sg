@@ -4,6 +4,8 @@ import { FeatureTrigger } from '../Types';
 import { CupsResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
 import { RNG } from '../RNG';
+import { ThreeBackground } from '../../threeBackground';
+import { playTarotTearEffects } from './TearEffectHelper';
 
 // ─── Easing helpers ───────────────────────────────────────────
 function easeOutCubic(t: number): number {
@@ -70,7 +72,9 @@ export class CupsRevealAnimation {
     private padding: number,
     private cols: number,
     private rows: number,
-    seed: number
+    seed: number,
+    private threeBg: ThreeBackground | null = null,
+    private pixiCanvas: HTMLCanvasElement | null = null
   ) {
     this.scrollLayer = new Container();
     this.multiplierLayer = new Container();
@@ -133,11 +137,23 @@ export class CupsRevealAnimation {
     }
   }
 
-  // ── Phase 1: Hide Cups Columns ───────────────────────────
+  // ── Phase 1: Hide Cups Columns (with tear effect) ────────
   private async phaseHideCups(feature: FeatureTrigger): Promise<void> {
-    // Simply hide the Cups tarot columns
-    for (const col of feature.columns) {
-      this.reelSpinners[col].setColumnVisible(false);
+    if (this.threeBg && this.pixiCanvas) {
+      await playTarotTearEffects(
+        this.threeBg,
+        feature.columns,
+        feature.type,
+        this.reelSpinners,
+        this.cellSize,
+        this.padding,
+        this.rows,
+        this.pixiCanvas
+      );
+    } else {
+      for (const col of feature.columns) {
+        this.reelSpinners[col].setColumnVisible(false);
+      }
     }
   }
 

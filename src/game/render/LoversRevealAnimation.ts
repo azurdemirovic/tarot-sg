@@ -3,7 +3,10 @@ import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { LoversResult, LoversSpinResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
+import { GridView } from './GridView';
 import { WinDisplay } from './WinDisplay';
+import { ThreeBackground } from '../../threeBackground';
+import { playTarotTearEffects } from './TearEffectHelper';
 
 // ─── Easing helpers ───────────────────────────────────────────
 function easeOutCubic(t: number): number {
@@ -65,7 +68,10 @@ export class LoversRevealAnimation {
     private cellSize: number,
     private padding: number,
     private cols: number,
-    private rows: number
+    private rows: number,
+    private gridView: GridView,
+    private threeBg: ThreeBackground | null = null,
+    private pixiCanvas: HTMLCanvasElement | null = null
   ) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
@@ -127,9 +133,9 @@ export class LoversRevealAnimation {
 
         const selectedIndex = await this.phaseCardPick(candidates, totalWidth, totalHeight);
 
-        // C2: Generate a fresh grid for this spin, then apply bond selection
+        // C2: Generate a fresh grid for this spin, then spin-drop it onto the table
         const freshGrid = onGenerateFreshGrid();
-        this.phaseShowFreshGrid(freshGrid, feature);
+        await this.phaseShowFreshGrid(freshGrid);
 
         const result = onSelection(selectedIndex);
         const spinResult = result.spinResult;
@@ -151,73 +157,56 @@ export class LoversRevealAnimation {
     }
   }
 
-  // ── Phase A: Hide Lovers tarot columns ──────────────────
+  // ── Phase A: Hide Lovers tarot columns (with tear effect) ──
+  // Pre-generates premium symbols so they're visible underneath the tear.
   private async phaseHideLovers(feature: FeatureTrigger): Promise<void> {
-    for (const col of feature.columns) {
-      this.reelSpinners[col].setColumnVisible(false);
-    }
-  }
-
-  // ── Phase B: Reveal freed columns with premium symbols ──
-  private async phaseRevealPremiums(feature: FeatureTrigger, _loversResult: LoversResult): Promise<void> {
+    // Generate premium symbols to place underneath the tarot before tearing
     const premiumPool = this.assetLoader.getSymbolsByTier('PREMIUM')
       .filter(s => !LoversRevealAnimation.ANCHOR_SYMBOLS.has(s.id));
-    const sortedCols = [...feature.columns].sort((a, b) => a - b);
-    const stagger = 100;
-    const popDuration = 400;
 
-    // Set premium symbols on Lovers columns
-    for (const col of sortedCols) {
+    const finalSymbolIds = new Map<number, string[]>();
+    for (const col of feature.columns) {
       const symbolIds: string[] = [];
       for (let row = 0; row < this.rows; row++) {
         symbolIds.push(premiumPool[Math.floor(Math.random() * premiumPool.length)].id);
       }
-      this.reelSpinners[col].setSymbols(symbolIds, false);
-      this.reelSpinners[col].setColumnVisible(true);
-
-      const sprites = this.reelSpinners[col].getVisibleSprites();
-      for (const s of sprites) {
-        s.scale.set(0);
-        s.alpha = 0;
-      }
+      finalSymbolIds.set(col, symbolIds);
     }
 
-    // Staggered pop-in
-    const allDone: Promise<void>[] = [];
-    let idx = 0;
+    // Store for phaseRevealPremiums to reuse
+    this._loversUnderlyingSymbols = finalSymbolIds;
+
+    if (this.threeBg && this.pixiCanvas) {
+      await playTarotTearEffects(
+        this.threeBg,
+        feature.columns,
+        feature.type,
+        this.reelSpinners,
+        this.cellSize,
+        this.padding,
+        this.rows,
+        this.pixiCanvas,
+        finalSymbolIds
+      );
+    } else {
+      // Fallback: set symbols directly
+      for (const col of feature.columns) {
+        this.reelSpinners[col].setSymbols(finalSymbolIds.get(col)!, false);
+        this.reelSpinners[col].setColumnVisible(true);
+      }
+    }
+  }
+
+  private _loversUnderlyingSymbols: Map<number, string[]> = new Map();
+
+  // ── Phase B: Reveal freed columns with premium symbols ──
+  // Symbols are already visible from the tear — just ensure columns are shown.
+  private async phaseRevealPremiums(feature: FeatureTrigger, _loversResult: LoversResult): Promise<void> {
+    const sortedCols = [...feature.columns].sort((a, b) => a - b);
+
     for (const col of sortedCols) {
-      const sprites = this.reelSpinners[col].getVisibleSprites();
-      const targetScales = sprites.map(s => {
-        // Target scale is the normal symbol size
-        const size = this.cellSize - 20;
-        return { x: size / (s.texture.width || 1), y: size / (s.texture.height || 1) };
-      });
-
-      for (let row = 0; row < this.rows; row++) {
-        const delayMs = idx * stagger;
-        const sprite = sprites[row];
-        const target = targetScales[row];
-        idx++;
-
-        allDone.push(
-          wait(delayMs).then(async () => {
-            await tween(popDuration, (t) => {
-              let s: number;
-              if (t < 0.55) {
-                s = easeOutBack(t / 0.55) * 1.12;
-              } else {
-                s = 1.12 - ((t - 0.55) / 0.45) * 0.12;
-              }
-              sprite.scale.set(target.x * s, target.y * s);
-              sprite.alpha = Math.min(1, t * 3);
-            }, easeOutCubic);
-            sprite.scale.set(target.x, target.y);
-            sprite.alpha = 1;
-          })
-        );
-      }
+      this.reelSpinners[col].setColumnVisible(true);
     }
-    await Promise.all(allDone);
   }
 
   // ── Rarity → color mapping for card fronts ──────────────
@@ -414,15 +403,16 @@ export class LoversRevealAnimation {
     return selectedIndex;
   }
 
-  // ── Phase C2b: Show fresh grid (update all non-tarot columns) ──
-  private phaseShowFreshGrid(freshGrid: Grid, feature: FeatureTrigger): void {
-    const loversColSet = new Set(feature.columns);
+  // ── Phase C2b: Show fresh grid with natural spin-drop animation ──
+  // ALL columns spin with fresh symbols (including former tarot columns).
+  private async phaseShowFreshGrid(freshGrid: Grid): Promise<void> {
+    // Ensure all columns are visible before spinning
     for (let col = 0; col < this.cols; col++) {
-      if (loversColSet.has(col)) continue; // Skip Lovers columns (they're hidden/overlaid)
-      const symbolIds = freshGrid[col].map(cell => cell.symbolId);
-      this.reelSpinners[col].setSymbols(symbolIds, false);
       this.reelSpinners[col].setColumnVisible(true);
     }
+
+    // Spin all columns with natural drop animation
+    await this.gridView.spinColumnsToGrid(freshGrid);
   }
 
   // ── Phase C3: Animate MALE/FEMALE anchors ────────────────

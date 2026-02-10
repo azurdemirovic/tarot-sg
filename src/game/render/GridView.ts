@@ -314,6 +314,53 @@ export class GridView extends Container {
     });
   }
 
+  /**
+   * Spin specific columns to new symbols with natural drop animation.
+   * Used during Lovers multi-spin for the fresh grid each round.
+   * @param grid - Full grid data
+   * @param columnsToSpin - Which columns to animate (others left unchanged)
+   */
+  async spinColumnsToGrid(grid: Grid, columnsToSpin?: number[]): Promise<void> {
+    const cols = columnsToSpin ?? Array.from({ length: this.cols }, (_, i) => i);
+
+    this.isAnimating = true;
+
+    // Start spinning the specified columns
+    for (const col of cols) {
+      const symbolIds = grid[col].map(cell => cell.symbolId);
+      this.reelSpinners[col].startSpin(symbolIds, false);
+    }
+
+    // Wait for all to settle (same pattern as spinToGrid)
+    await new Promise<void>((resolve) => {
+      // Schedule natural stops with stagger
+      const baseDelay = 600;  // shorter than main spin for snappier feel
+      const stagger = 150;
+      const timers: ReturnType<typeof setTimeout>[] = [];
+
+      cols.forEach((col, i) => {
+        const delay = baseDelay + i * stagger;
+        const timer = setTimeout(() => {
+          this.reelSpinners[col].requestStop(0, 0.7);
+        }, delay);
+        timers.push(timer);
+      });
+
+      // Poll until all are done
+      const checkAllDone = () => {
+        const allSettled = cols.every(col => !this.reelSpinners[col].getIsSpinning());
+        if (allSettled) {
+          resolve();
+        } else {
+          requestAnimationFrame(checkAllDone);
+        }
+      };
+      setTimeout(checkAllDone, baseDelay);
+    });
+
+    this.isAnimating = false;
+  }
+
   update(delta: number): void {
     if (this.isAnimating) {
       this.reelSpinners.forEach(reel => reel.update(delta));
