@@ -1,8 +1,9 @@
-import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
+import { Container, Graphics, Sprite } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { FoolResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
+import { WinDisplay } from './WinDisplay';
 
 // ─── Easing helpers ───────────────────────────────────────────
 function easeOutCubic(t: number): number {
@@ -60,7 +61,7 @@ export class FoolRevealAnimation {
   private dimGraphic: Graphics;
   private particleContainer: Container;
   private glowContainer: Container;
-  private multiplierText: Text | null = null;
+  
 
   constructor(
     private parent: Container,
@@ -103,11 +104,8 @@ export class FoolRevealAnimation {
       await this.phaseReveal(feature, foolResult, finalGrid);
 
       // Phase C — Show win display (only if win > bet × 10)
-      if (wins.length > 0 && totalWin > betAmount * 10) {
-        await this.phaseWinDisplay(wins, multiplier, totalWin, totalWidth, totalHeight);
-        await wait(1500); // Hold display
-        await this.phaseCleanup(totalWidth, totalHeight);
-      }
+      const winDisplay = new WinDisplay(this.parent);
+      await winDisplay.show(wins, multiplier, totalWin, betAmount, totalWidth, totalHeight);
     } finally {
       this.cleanup();
     }
@@ -279,153 +277,6 @@ export class FoolRevealAnimation {
     }, easeOutCubic);
   }
 
-  // ── Phase C: Win Display (Grid Dim + Payout + Multiplier + Total) ──
-  private async phaseWinDisplay(
-    wins: any[],
-    multiplier: number,
-    totalWin: number,
-    tw: number,
-    th: number
-  ): Promise<void> {
-    // 1. Dim only the grid area (not full screen)
-    this.dimGraphic.clear();
-    this.dimGraphic.rect(0, 0, tw, th);
-    this.dimGraphic.fill({ color: 0x000000, alpha: 0.6 });
-    this.overlay.addChild(this.dimGraphic);
-
-    // 2. Calculate base payline payout (before multiplier)
-    const basePayout = wins.reduce((sum, win) => sum + win.payout, 0);
-
-    // 3. Create payline payout text (center)
-    const payoutText = new Text({
-      text: `${basePayout.toFixed(2)} €`,
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 64,
-        fill: 0xFFD700,
-        stroke: { color: 0x000000, width: 6 },
-        dropShadow: {
-          color: 0x000000,
-          blur: 8,
-          distance: 3,
-          alpha: 0.8,
-        },
-      }),
-    });
-    payoutText.anchor.set(0.5);
-    payoutText.x = tw / 2 - 60; // Slightly left of center
-    payoutText.y = th / 2 - 40; // Above center
-    payoutText.alpha = 0;
-    this.overlay.addChild(payoutText);
-
-    // 4. Create multiplier text (next to payout)
-    const multiplierText = new Text({
-      text: `×${multiplier}`,
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 64,
-        fill: 0xFFD700,
-        stroke: { color: 0x000000, width: 6 },
-        dropShadow: {
-          color: 0x000000,
-          blur: 8,
-          distance: 3,
-          alpha: 0.8,
-        },
-      }),
-    });
-    multiplierText.anchor.set(0.5);
-    multiplierText.x = tw / 2 + 60; // Slightly right of center
-    multiplierText.y = th / 2 - 40; // Same height as payout
-    multiplierText.alpha = 0;
-    this.overlay.addChild(multiplierText);
-
-    // 5. Create total win text (below, counting up, growing)
-    const totalText = new Text({
-      text: '0.00 €',
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 48,
-        fill: 0xFFFFFF,
-        stroke: { color: 0x000000, width: 5 },
-        dropShadow: {
-          color: 0x000000,
-          blur: 10,
-          distance: 4,
-          alpha: 0.9,
-        },
-      }),
-    });
-    totalText.anchor.set(0.5);
-    totalText.x = tw / 2;
-    totalText.y = th / 2 + 30; // Below payout/multiplier
-    totalText.alpha = 0;
-    totalText.scale.set(0.8);
-    this.overlay.addChild(totalText);
-    this.multiplierText = totalText; // Store for cleanup
-
-    // 6. Animate: fade in payout + multiplier, then count up total
-    await tween(400, (t) => {
-      payoutText.alpha = t;
-      multiplierText.alpha = t;
-    }, easeOutCubic);
-
-    // 7. Count up total win while growing in size
-    const countDuration = 1000;
-    const start = performance.now();
-    const startScale = 0.8;
-    const endScale = 1.2;
-
-    await new Promise<void>(resolve => {
-      const frame = (now: number) => {
-        const elapsed = now - start;
-        const t = Math.min(elapsed / countDuration, 1);
-        const ease = easeOutCubic(t);
-
-        // Count up
-        const currentValue = totalWin * ease;
-        totalText.text = `${currentValue.toFixed(2)} €`;
-
-        // Grow in size
-        const scale = startScale + (endScale - startScale) * ease;
-        totalText.scale.set(scale);
-
-        // Fade in
-        totalText.alpha = Math.min(1, t * 2);
-
-        if (t < 1) {
-          requestAnimationFrame(frame);
-        } else {
-          totalText.text = `${totalWin.toFixed(2)} €`;
-          totalText.scale.set(endScale);
-          totalText.alpha = 1;
-          resolve();
-        }
-      };
-      requestAnimationFrame(frame);
-    });
-  }
-
-  // ── Phase F: Fade Out ────────────────────────────────────
-  private async phaseCleanup(tw: number, th: number): Promise<void> {
-    await tween(400, (t) => {
-      // Dim fades out
-      this.dimGraphic.clear();
-      this.dimGraphic.rect(0, 0, tw, th);
-      this.dimGraphic.fill({ color: 0x000000, alpha: 0.6 * (1 - t) });
-
-      // All text elements fade
-      this.overlay.children.forEach((child) => {
-        if (child instanceof Text) {
-          child.alpha = 1 - t;
-        }
-      });
-
-      // Glows fade
-      this.glowContainer.alpha = 1 - t;
-    }, easeOutCubic);
-  }
-
   // ── Tear down all temporary display objects ──────────────
   private cleanup(): void {
     this.parent.removeChild(this.overlay);
@@ -440,9 +291,6 @@ export class FoolRevealAnimation {
       this.glowContainer.children[0].destroy();
     }
 
-    if (this.multiplierText) {
-      this.multiplierText.destroy();
-      this.multiplierText = null;
-    }
+    
   }
 }

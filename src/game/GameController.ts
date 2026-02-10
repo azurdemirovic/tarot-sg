@@ -2,7 +2,7 @@ import { RNG } from './RNG';
 import { AssetLoader } from './AssetLoader';
 import { SpinGenerator } from './logic/SpinGenerator';
 import { PaylineEvaluator } from './logic/PaylineEvaluator';
-import { TarotFeatureProcessor, FoolResult, CupsResult } from './logic/TarotFeatureProcessor';
+import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult } from './logic/TarotFeatureProcessor';
 import { Grid, TarotColumn, FeatureTrigger, GameMode, WinLine } from './Types';
 
 export interface SpinOutput {
@@ -15,6 +15,8 @@ export interface SpinOutput {
   foolResult: FoolResult | null;
   /** If Cups triggered, details of the initial multipliers */
   cupsResult: CupsResult | null;
+  /** If Lovers triggered, details of the bond fill */
+  loversResult: LoversResult | null;
   /** The final grid used for payline evaluation (after feature, if any) */
   finalGrid: Grid;
   wins: WinLine[];
@@ -64,6 +66,7 @@ export class GameController {
 
     this.isSpinning = true;
     this.balance -= this.betAmount;
+    this.paylineEvaluator.currentBetAmount = this.betAmount;
 
     // ── Phase 1: generate raw grid (with possible tarot columns) ──
     const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.8);
@@ -79,6 +82,7 @@ export class GameController {
     const feature = this.featureProcessor.detectTrigger(tarotColumns);
     let foolResult: FoolResult | null = null;
     let cupsResult: CupsResult | null = null;
+    let loversResult: LoversResult | null = null;
     let multiplier = 1;
 
     if (feature) {
@@ -89,20 +93,27 @@ export class GameController {
         multiplier = foolResult.multiplier;
       } else if (feature.type === 'T_CUPS') {
         cupsResult = this.featureProcessor.applyCups(finalGrid, feature);
-        // Cups feature doesn't apply multiplier during initial spin
-        // The multiplier collection loop will be handled in the animation
+      } else if (feature.type === 'T_LOVERS') {
+        loversResult = this.featureProcessor.applyLovers(finalGrid, feature);
+        multiplier = loversResult.multiplier;
+        // Grid is NOT filled yet — deferred until player picks a card
       }
-      // Other features (Lovers, Priestess, Death) → future implementation
+      // Other features (Priestess, Death) → future implementation
     }
 
     // ── Phase 3: evaluate paylines on the *final* grid ──
-    const wins = this.paylineEvaluator.evaluateAllPaylines(finalGrid);
+    // Skip evaluation for Lovers — grid isn't filled until player picks
+    const wins = (feature?.type === 'T_LOVERS')
+      ? []
+      : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
 
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    this.balance += totalWin;
+    if (feature?.type !== 'T_LOVERS') {
+      this.balance += totalWin;
+    }
 
     // Logging
     if (wins.length > 0) {
@@ -126,6 +137,7 @@ export class GameController {
       feature,
       foolResult,
       cupsResult,
+      loversResult,
       finalGrid,
       wins,
       totalWin,
@@ -140,6 +152,7 @@ export class GameController {
       feature: null,
       foolResult: null,
       cupsResult: null,
+      loversResult: null,
       finalGrid: this.currentGrid!,
       wins: this.lastWins,
       totalWin: this.lastWin,
@@ -152,6 +165,7 @@ export class GameController {
    */
   forceTarotSpin(tarotType: string, columns: number[]): SpinOutput {
     this.balance -= this.betAmount;
+    this.paylineEvaluator.currentBetAmount = this.betAmount;
 
     const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpinWithTarots(tarotType, columns);
     this.currentGrid = initialGrid;
@@ -162,6 +176,7 @@ export class GameController {
     const feature = this.featureProcessor.detectTrigger(tarotColumns);
     let foolResult: FoolResult | null = null;
     let cupsResult: CupsResult | null = null;
+    let loversResult: LoversResult | null = null;
     let multiplier = 1;
 
     if (feature && feature.type === 'T_FOOL') {
@@ -169,19 +184,104 @@ export class GameController {
       multiplier = foolResult.multiplier;
     } else if (feature && feature.type === 'T_CUPS') {
       cupsResult = this.featureProcessor.applyCups(finalGrid, feature);
+    } else if (feature && feature.type === 'T_LOVERS') {
+      loversResult = this.featureProcessor.applyLovers(finalGrid, feature);
+      multiplier = loversResult.multiplier;
+      // Grid is NOT filled yet — deferred until player picks a card
     }
 
-    const wins = this.paylineEvaluator.evaluateAllPaylines(finalGrid);
+    // Skip evaluation for Lovers — grid isn't filled until player picks
+    const wins = (feature?.type === 'T_LOVERS')
+      ? []
+      : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
 
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    this.balance += totalWin;
+    if (feature?.type !== 'T_LOVERS') {
+      this.balance += totalWin;
+    }
 
     this.isSpinning = false;
 
-    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, finalGrid, wins, totalWin, multiplier };
+    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, loversResult, finalGrid, wins, totalWin, multiplier };
+  }
+
+  /**
+   * Generate 3 candidate bond symbols for a Lovers spin.
+   */
+  generateLoversCandidates(): string[] {
+    return this.featureProcessor.generateLoversCandidates();
+  }
+
+  /**
+   * Apply a single Lovers spin selection (after player picks a card).
+   * Places MALE and FEMALE anchors, fills the bounding area with bond symbol.
+   * Re-evaluates paylines and returns updated results.
+   */
+  applyLoversSpinSelection(
+    finalGrid: Grid,
+    loversResult: LoversResult,
+    candidateSymbols: string[],
+    selectedIndex: number
+  ): { spinResult: LoversSpinResult; wins: WinLine[]; totalWin: number; multiplier: number } {
+    // Ensure bet amount is current for payline evaluation
+    this.paylineEvaluator.currentBetAmount = this.betAmount;
+
+    // Apply the selection to the grid
+    const spinResult = this.featureProcessor.applyLoversSpinSelection(
+      finalGrid, loversResult, candidateSymbols, selectedIndex
+    );
+
+    // Re-evaluate paylines on the updated grid
+    const wins = this.paylineEvaluator.evaluateAllPaylines(finalGrid);
+    const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
+    const multiplier = loversResult.multiplier;
+    const totalWin = baseWin * multiplier;
+
+    // Update game state
+    this.lastWins = wins;
+    this.lastWin = totalWin;
+    this.balance += totalWin;
+
+    if (wins.length > 0) {
+      console.log(`🎉 Lovers Spin ${loversResult.spinsTotal - loversResult.spinsRemaining}/${loversResult.spinsTotal}: ${wins.length} Payline Win(s), Total: ${totalWin.toFixed(4)} EUR`);
+    }
+
+    return { spinResult, wins, totalWin, multiplier };
+  }
+
+  /**
+   * Apply a Lovers spin selection — called from main.ts after player picks a card.
+   * Wraps applyLoversSpinSelection with the signature main.ts expects.
+   */
+  applyLoversSelection(
+    finalGrid: Grid,
+    _feature: FeatureTrigger,
+    loversResult: LoversResult,
+    selectedIndex: number
+  ): { spinResult: LoversSpinResult; finalGrid: Grid; wins: WinLine[]; totalWin: number; multiplier: number } {
+    const candidates = loversResult.currentSpin?.candidateSymbols
+      ?? this.featureProcessor.generateLoversCandidates();
+    const result = this.applyLoversSpinSelection(finalGrid, loversResult, candidates, selectedIndex);
+    return {
+      spinResult: result.spinResult,
+      finalGrid: finalGrid,
+      wins: result.wins,
+      totalWin: result.totalWin,
+      multiplier: result.multiplier,
+    };
+  }
+
+  /**
+   * Generate a fresh random grid (no tarot columns) for Lovers multi-spin.
+   * Each spin starts on a completely new board.
+   */
+  generateFreshGrid(): Grid {
+    const { grid } = this.spinGenerator.generateSpin(5, 3, 0); // 0 tarot chance
+    this.currentGrid = grid;
+    return grid.map(col => col.map(cell => ({ ...cell }))); // deep clone
   }
 
   getSeed(): number { return this.rng.getState(); }

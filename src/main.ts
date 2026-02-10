@@ -5,6 +5,7 @@ import { GridView } from './game/render/GridView';
 import { PaylineOverlay } from './game/render/PaylineOverlay';
 import { FoolRevealAnimation } from './game/render/FoolRevealAnimation';
 import { CupsRevealAnimation } from './game/render/CupsRevealAnimation';
+import { LoversRevealAnimation } from './game/render/LoversRevealAnimation';
 import { ThreeBackground } from './threeBackground';
 import { DEBUG } from './game/config/debug';
 
@@ -23,6 +24,13 @@ const spinBtn = document.getElementById('spin-btn') as HTMLButtonElement;
 const balanceDisplay = document.getElementById('balance-display') as HTMLElement;
 const winDisplay = document.getElementById('win-display') as HTMLElement;
 const winPanel = document.getElementById('win-panel') as HTMLElement;
+const betMinusBtn = document.getElementById('bet-minus') as HTMLButtonElement;
+const betPlusBtn = document.getElementById('bet-plus') as HTMLButtonElement;
+const betDisplay = document.getElementById('bet-display') as HTMLElement;
+
+// Bet steps
+const BET_STEPS = [0.20, 0.40, 0.80, 1, 1.20, 1.60, 2, 2.50, 5, 10, 15, 20, 50, 100];
+let currentBetIndex = 0; // starts at 0.20
 
 async function init() {
   try {
@@ -97,6 +105,11 @@ async function init() {
       }
     });
 
+    // Bet +/- buttons
+    betMinusBtn.addEventListener('click', () => changeBet(-1));
+    betPlusBtn.addEventListener('click', () => changeBet(1));
+    updateBetUI();
+
     console.log('✅ Game ready! Canvas size:', app.canvas.width, 'x', app.canvas.height);
     
     app.ticker.add((ticker) => {
@@ -135,6 +148,7 @@ let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
 let hasSpunOnce: boolean = false; // Track if any spin has happened
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
+let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
 let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
 
@@ -148,6 +162,9 @@ function resetState() {
 }
 
 async function handleSpin() {
+  // ── LOVERS FEATURE ACTIVE: Block all spin input ──
+  if (loversFeatureActive) return;
+
   // ── CUPS FEATURE ACTIVE: Speed up current collection spin ──
   if (cupsFeatureActive && currentCupsAnimation) {
     console.log('⚡ Speeding up Cups collection spin');
@@ -172,21 +189,25 @@ async function handleSpin() {
   winPanel.classList.remove('visible');
   canSkip = false;
 
-  // Debug: Force Cups feature if enabled (only on first spin)
+  // Debug: Force feature if enabled (only on first spin)
   let spinOutput: SpinOutput;
-  if (DEBUG.FORCE_CUPS && !hasSpunOnce) {
+  if (!hasSpunOnce && DEBUG.FORCE_CUPS) {
     console.log('🔧 DEBUG: Forcing Cups feature (first spin only)');
     hasSpunOnce = true;
     spinOutput = gameController.forceTarotSpin('T_CUPS', DEBUG.CUPS_COLUMNS);
+  } else if (!hasSpunOnce && DEBUG.FORCE_LOVERS) {
+    console.log('🔧 DEBUG: Forcing Lovers feature (first spin only)');
+    hasSpunOnce = true;
+    spinOutput = gameController.forceTarotSpin('T_LOVERS', DEBUG.LOVERS_COLUMNS);
   } else {
     spinOutput = gameController.spin();
     hasSpunOnce = true;
   }
   currentSpinData = spinOutput;
 
-  // After 0.25s, unlock button for hurry-up
+  // After 0.25s, unlock button for hurry-up (but not during features)
   skipEnableTimer = setTimeout(() => {
-    if (currentState === SpinState.SPINNING) {
+    if (currentState === SpinState.SPINNING && !loversFeatureActive && !cupsFeatureActive) {
       canSkip = true;
       spinBtn.disabled = false;
     }
@@ -274,6 +295,58 @@ async function handleSpin() {
       currentSpinData.totalWin = cupsPayout;
     }
 
+    // ── Phase 2c: If a Lovers feature triggered, play the reveal animation ──
+    if (spinOutput.feature && spinOutput.feature.type === 'T_LOVERS' && spinOutput.loversResult) {
+      spinBtn.disabled = true;
+      loversFeatureActive = true;
+      threeBg?.setFeatureColor('T_LOVERS');
+
+      const loversReveal = new LoversRevealAnimation(
+        gridView,
+        gridView.getReelSpinners(),
+        assetLoader,
+        gridView.getCellSize(),
+        gridView.getPadding(),
+        gridView.getCols(),
+        gridView.getRows()
+      );
+
+      const feature = spinOutput.feature;
+      const loversResult = spinOutput.loversResult;
+      let finalGrid = spinOutput.finalGrid;
+
+      await loversReveal.play(
+        feature,
+        loversResult,
+        (selectedIndex: number) => {
+          // Player picked a card — apply the bond fill to the current fresh grid
+          const result = gameController.applyLoversSelection(
+            finalGrid, feature, loversResult, selectedIndex
+          );
+          // Update spinOutput with the new results
+          finalGrid = result.finalGrid;
+          currentSpinData!.finalGrid = result.finalGrid;
+          currentSpinData!.wins = result.wins;
+          currentSpinData!.totalWin = result.totalWin;
+          currentSpinData!.multiplier = result.multiplier;
+          return result;
+        },
+        () => {
+          // Generate a fresh grid for each Lovers spin
+          finalGrid = gameController.generateFreshGrid();
+          return finalGrid;
+        },
+        gameController.betAmount
+      );
+      loversFeatureActive = false;
+      threeBg?.clearFeatureColor();
+
+      // Restore all reel columns to visible after Lovers
+      for (let col = 0; col < gridView.getCols(); col++) {
+        gridView.getReelSpinners()[col].setColumnVisible(true);
+      }
+    }
+
     // ── Phase 3: Show results ──
     await showResults();
   } catch (error) {
@@ -310,6 +383,25 @@ async function showResults() {
     }
     console.log(`🎉 Total Win: ${currentSpinData.totalWin.toFixed(4)} EUR`);
   }
+}
+
+function changeBet(direction: number): void {
+  // Don't allow bet changes during a spin or feature
+  if (currentState !== SpinState.IDLE || cupsFeatureActive || loversFeatureActive) return;
+
+  const newIndex = currentBetIndex + direction;
+  if (newIndex < 0 || newIndex >= BET_STEPS.length) return;
+
+  currentBetIndex = newIndex;
+  gameController.betAmount = BET_STEPS[currentBetIndex];
+  updateBetUI();
+}
+
+function updateBetUI(): void {
+  const bet = BET_STEPS[currentBetIndex];
+  betDisplay.textContent = bet.toFixed(2) + ' €';
+  betMinusBtn.disabled = currentBetIndex === 0;
+  betPlusBtn.disabled = currentBetIndex === BET_STEPS.length - 1;
 }
 
 function updateUI() {

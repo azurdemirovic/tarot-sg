@@ -13,8 +13,14 @@ export const DEBUG = {
   BG_ANIMATE_CAMERA: true,
 
   /** Force Cups feature on next spin (for testing) */
-  FORCE_CUPS: true,
+  FORCE_CUPS: false,
 
   /** Columns to place Cups cards (2 or 3 columns) */
   CUPS_COLUMNS: [1, 3],
+
+  /** Force Lovers feature on next spin (for testing) */
+  FORCE_LOVERS: true,
+
+  /** Columns to place Lovers cards (2 or 3 columns) */
+  LOVERS_COLUMNS: [1, 3],
 };

@@ -89,10 +89,26 @@
       "isTarot": false
     },
     {
+      "id": "MALE",
+      "tier": "PREMIUM",
+      "filename": "male.png",
+      "baseWeight": 0,
+      "payValues": [0, 0, 20, 50, 200],
+      "isTarot": false
+    },
+    {
+      "id": "FEMALE",
+      "tier": "PREMIUM",
+      "filename": "female.png",
+      "baseWeight": 0,
+      "payValues": [0, 0, 20, 50, 200],
+      "isTarot": false
+    },
+    {
       "id": "T_FOOL",
       "tier": "TAROT",
       "filename": "T_FOOL.jpg",
-      "baseWeight": 10,
+      "baseWeight": 0,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
@@ -100,7 +116,7 @@
       "id": "T_CUPS",
       "tier": "TAROT",
       "filename": "T_CUPS.jpg",
-      "baseWeight": 10,
+      "baseWeight": 0,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
@@ -108,7 +124,7 @@
       "id": "T_LOVERS",
       "tier": "TAROT",
       "filename": "T_LOVERS.jpg",
-      "baseWeight": 0,
+      "baseWeight": 30,
       "payValues": [0, 0, 20, 40, 100],
       "isTarot": true
     },

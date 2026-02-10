@@ -108,6 +108,39 @@
         cursor: not-allowed;
       }
 
+      .bet-btn {
+        background: none;
+        border: 2px solid #918898;
+        color: #fff;
+        font-family: 'CustomFont', 'Arial', sans-serif;
+        font-size: 24px;
+        font-weight: bold;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+
+      .bet-btn:hover:not(:disabled) {
+        border-color: #FFD700;
+        color: #FFD700;
+        transform: scale(1.1);
+      }
+
+      .bet-btn:active:not(:disabled) {
+        transform: scale(0.95);
+      }
+
+      .bet-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
       .info-panel {
         background: transparent;
         border: none;
@@ -161,11 +194,13 @@
             <div class="info-value" id="balance-display">100.00 €</div>
           </div>
           
+          <button id="bet-minus" class="bet-btn">−</button>
           <button id="spin-btn">SPIN</button>
+          <button id="bet-plus" class="bet-btn">+</button>
           
           <div class="info-panel" style="text-align: center; margin-left: auto; margin-right: 10%;">
             <div class="info-label">Bet</div>
-            <div class="info-value">0.20 €</div>
+            <div class="info-value" id="bet-display">0.20 €</div>
           </div>
         </div>
       </div>

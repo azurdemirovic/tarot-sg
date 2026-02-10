@@ -17,6 +17,8 @@ interface Paytable {
 
 export class PaylineEvaluator {
   private paytable: Paytable;
+  /** Current total bet amount — used to derive betPerLine dynamically */
+  public currentBetAmount: number = 0.20;
 
   constructor(private assetLoader: AssetLoader) {
     this.paytable = paytableData as Paytable;
@@ -198,7 +200,9 @@ export class PaylineEvaluator {
       return 0;
     }
 
-    return payout * this.paytable.betPerLine;
+    // Derive betPerLine from the current total bet amount
+    const betPerLine = this.currentBetAmount / this.paytable.totalPaylines;
+    return payout * betPerLine;
   }
 
   /**
