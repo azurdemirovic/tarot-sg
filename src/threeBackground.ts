@@ -67,11 +67,17 @@ export class ThreeBackground {
   // Sol glow effect (organic noisy sprite)
   private solGlow: THREE.Sprite | null = null;
 
+  // Fool glow effect (organic noisy sprite)
+  private foolGlow: THREE.Sprite | null = null;
+
   // Queen of Swords model (for High Priestess feature)
   private queenModel: THREE.Object3D | null = null;
   private queenMixer: THREE.AnimationMixer | null = null;
   private isQueenSwapped: boolean = false;
   private queenReady: boolean = false;
+
+  // Queen glow effect (organic noisy sprite)
+  private queenGlow: THREE.Sprite | null = null;
 
   
   constructor(options: ThreeBgOptions) {
@@ -833,6 +839,26 @@ export class ThreeBackground {
         model.scale.setScalar(0.1);
         model.visible = false; // Hidden by default, shown during Priestess feature
 
+        // Create organic glow sprite at queen's position for entrance/exit effect
+        const queenGlowTexture = this.generateGlowTexture();
+        const queenGlowMat = new THREE.SpriteMaterial({
+          map: queenGlowTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const queenGlowSprite = new THREE.Sprite(queenGlowMat);
+        // Position glow at the visual center of the model (X/Z from position, Y at midpoint of bounding box)
+        const queenBox = new THREE.Box3().setFromObject(model);
+        const queenSize = queenBox.getSize(new THREE.Vector3());
+        queenGlowSprite.position.set(model.position.x, model.position.y + queenSize.y * 0.75, model.position.z);
+        queenGlowSprite.scale.setScalar(0.1);
+        queenGlowSprite.visible = false;
+        this.bgGroup.add(queenGlowSprite);
+        this.queenGlow = queenGlowSprite;
+
         this.bgGroup.add(model);
         this.queenModel = model;
 
@@ -892,34 +918,54 @@ export class ThreeBackground {
     });
   }
 
-  /** Animate queen scaling up from nothing */
+  /**
+   * Animate queen entrance: glow builds up, model pops in fully opaque behind glow,
+   * then glow fades to reveal the solid model. Matches Sol entrance style.
+   */
   private animateQueenEntrance(): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.queenModel) { resolve(); return; }
+      if (!this.queenModel || !this.queenGlow) { resolve(); return; }
 
       const model = this.queenModel;
-      const targetScale = model.userData.targetScale || model.scale.x;
-      model.scale.setScalar(0.01);
-      model.visible = true;
+      const glow = this.queenGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+      model.visible = false;
       this.isQueenSwapped = true;
 
-      const duration = 1000; // ms
+      const duration = 1800;
       const startTime = performance.now();
+      const maxGlowScale = 10;
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        const c1 = 1.70158;
-        const c3 = c1 + 1;
-        const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 
-        model.scale.setScalar(targetScale * eased);
+        if (t < 0.35) {
+          const p = t / 0.35;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (!model.visible) {
+            model.visible = true;
+          }
+          const p = (t - 0.35) / 0.65;
+          const eased = p * p * p;
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.6));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
-          model.scale.setScalar(targetScale);
-          console.log('⚔️ Queen of Swords appeared');
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = true;
+          console.log('⚔️ Queen of Swords materialized from glow');
           resolve();
         }
       };
@@ -927,7 +973,10 @@ export class ThreeBackground {
     });
   }
 
-  /** Animate queen shrinking away, then hide */
+  /**
+   * Animate queen exit: glow expands over the model, model hides behind glow,
+   * then glow fades away. Matches Sol exit style.
+   */
   restoreQueen(): Promise<void> {
     return new Promise((resolve) => {
       if (!this.isQueenSwapped || !this.queenModel) {
@@ -936,24 +985,52 @@ export class ThreeBackground {
       }
 
       const model = this.queenModel;
-      const startScale = model.scale.x;
-      const duration = 600; // ms
+      const glow = this.queenGlow;
+
+      if (!glow) {
+        model.visible = false;
+        this.isQueenSwapped = false;
+        resolve();
+        return;
+      }
+
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+
+      const duration = 1200;
       const startTime = performance.now();
+      const maxGlowScale = 10;
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        const eased = t * t * t;
 
-        model.scale.setScalar(startScale * (1 - eased));
+        if (t < 0.4) {
+          const p = t / 0.4;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (model.visible) {
+            model.visible = false;
+          }
+          const p = (t - 0.4) / 0.6;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.85));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
           model.visible = false;
-          model.scale.setScalar(startScale); // Reset for next use
           this.isQueenSwapped = false;
-          console.log('⚔️ Queen of Swords disappeared');
+          console.log('⚔️ Queen of Swords dissolved into glow');
           resolve();
         }
       };
@@ -1025,14 +1102,37 @@ export class ThreeBackground {
           }
         });
 
-        // Hardcoded transform values
+        // Hardcoded transform values — starts hidden
         model.position.set(-11.5, -3.5, 12.5);
         model.rotation.set(0.00, 0.49, -0.00);
         model.scale.setScalar(4.4);
-        model.visible = true; // Kept visible for further adjustments
+        model.visible = false; // Hidden by default, shown during Fool feature
+
+        // Create organic glow sprite at fool's position for entrance/exit effect
+        const foolGlowTexture = this.generateGlowTexture();
+        const foolGlowMat = new THREE.SpriteMaterial({
+          map: foolGlowTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const foolGlowSprite = new THREE.Sprite(foolGlowMat);
+        // Position glow at the visual center of the model (X/Z from position, Y at midpoint of bounding box)
+        const foolBox = new THREE.Box3().setFromObject(model);
+        const foolSize = foolBox.getSize(new THREE.Vector3());
+        foolGlowSprite.position.set(model.position.x, model.position.y + foolSize.y * 0.75, model.position.z);
+        foolGlowSprite.scale.setScalar(0.1);
+        foolGlowSprite.visible = false;
+        this.bgGroup.add(foolGlowSprite);
+        this.foolGlow = foolGlowSprite;
 
         this.bgGroup.add(model);
         this.foolModel = model;
+
+        // Store target scale for entrance animation
+        model.userData.targetScale = 4.4;
 
         // Set up animations with ping-pong
         if (gltf.animations && gltf.animations.length > 0) {
@@ -1046,7 +1146,14 @@ export class ThreeBackground {
           console.log(`🎬 Fool: ${gltf.animations.length} animation(s)`);
         }
 
-        console.log(`✅ Fool model loaded: ${path}`);
+        // Pre-compile to avoid first-frame glitches
+        model.visible = true;
+        this.renderer.compile(this.scene, this.camera);
+        this.renderer.render(this.scene, this.camera);
+        model.visible = false;
+        this.foolReady = true;
+
+        console.log(`✅ Fool model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
@@ -1080,34 +1187,54 @@ export class ThreeBackground {
     });
   }
 
-  /** Animate fool scaling up from nothing */
+  /**
+   * Animate fool entrance: glow builds up, model pops in fully opaque behind glow,
+   * then glow fades to reveal the solid model. Matches Sol entrance style.
+   */
   private animateFoolEntrance(): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.foolModel) { resolve(); return; }
+      if (!this.foolModel || !this.foolGlow) { resolve(); return; }
 
       const model = this.foolModel;
-      const targetScale = model.userData.targetScale || model.scale.x;
-      model.scale.setScalar(0.01);
-      model.visible = true;
+      const glow = this.foolGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+      model.visible = false;
       this.isFoolSwapped = true;
 
-      const duration = 1000;
+      const duration = 1800;
       const startTime = performance.now();
+      const maxGlowScale = 10;
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        const c1 = 1.70158;
-        const c3 = c1 + 1;
-        const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 
-        model.scale.setScalar(targetScale * eased);
+        if (t < 0.35) {
+          const p = t / 0.35;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (!model.visible) {
+            model.visible = true;
+          }
+          const p = (t - 0.35) / 0.65;
+          const eased = p * p * p;
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.6));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
-          model.scale.setScalar(targetScale);
-          console.log('🃏 Fool appeared');
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = true;
+          console.log('🃏 Fool materialized from glow');
           resolve();
         }
       };
@@ -1115,7 +1242,10 @@ export class ThreeBackground {
     });
   }
 
-  /** Animate fool shrinking away, then hide */
+  /**
+   * Animate fool exit: glow expands over the model, model hides behind glow,
+   * then glow fades away. Matches Sol exit style.
+   */
   restoreModel(): Promise<void> {
     return new Promise((resolve) => {
       if (!this.isFoolSwapped || !this.foolModel) {
@@ -1124,24 +1254,52 @@ export class ThreeBackground {
       }
 
       const model = this.foolModel;
-      const startScale = model.scale.x;
-      const duration = 600;
+      const glow = this.foolGlow;
+
+      if (!glow) {
+        model.visible = false;
+        this.isFoolSwapped = false;
+        resolve();
+        return;
+      }
+
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+
+      const duration = 1200;
       const startTime = performance.now();
+      const maxGlowScale = 10;
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        const eased = t * t * t;
 
-        model.scale.setScalar(startScale * (1 - eased));
+        if (t < 0.4) {
+          const p = t / 0.4;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (model.visible) {
+            model.visible = false;
+          }
+          const p = (t - 0.4) / 0.6;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.85));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
           model.visible = false;
-          model.scale.setScalar(startScale);
           this.isFoolSwapped = false;
-          console.log('🃏 Fool disappeared');
+          console.log('🃏 Fool dissolved into glow');
           resolve();
         }
       };
