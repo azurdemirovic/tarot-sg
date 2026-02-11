@@ -25,7 +25,7 @@ export const DEBUG = {
   LOVERS_COLUMNS: [1, 3],
 
   /** Force Priestess feature on next spin (for testing) */
-  FORCE_PRIESTESS: false,
+  FORCE_PRIESTESS: true,
 
   /** Columns to place Priestess cards (2 or 3 columns) */
   PRIESTESS_COLUMNS: [1, 3],

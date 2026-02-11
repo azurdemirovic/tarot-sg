@@ -257,7 +257,7 @@ async function handleSpin() {
       threeBg?.setFeatureColor('T_FOOL');
 
       // Swap 3D model to nightmare jester
-      await threeBg?.swapToModel('/assets/3d/nightmare_jester.glb', ['Plane001']);
+      await threeBg?.swapToModel();
 
       const foolReveal = new FoolRevealAnimation(
         gridView,
@@ -290,6 +290,9 @@ async function handleSpin() {
       cupsFeatureActive = true; // Mark Cups as active
       threeBg?.setFeatureColor('T_CUPS');
 
+      // Swap 3D model to sol (drops in from above)
+      await threeBg?.swapToSol();
+
       const cupsReveal = new CupsRevealAnimation(
         gridView,
         gridView.getReelSpinners(),
@@ -315,6 +318,7 @@ async function handleSpin() {
       cupsFeatureActive = false;
       currentCupsAnimation = null;
       threeBg?.clearFeatureColor();
+      await threeBg?.restoreSol();
 
       // Restore all reel columns to visible
       for (let col = 0; col < gridView.getCols(); col++) {
@@ -332,6 +336,9 @@ async function handleSpin() {
       spinBtn.disabled = false; // Allow spin button for hurry-up during reel spins
       priestessFeatureActive = true;
       threeBg?.setFeatureColor('T_PRIESTESS');
+
+      // Swap 3D model to queen of swords (scales up)
+      await threeBg?.swapToQueen();
 
       const priestessReveal = new PriestessRevealAnimation(
         gridView,
@@ -365,6 +372,7 @@ async function handleSpin() {
       priestessFeatureActive = false;
       currentPriestessAnimation = null;
       threeBg?.clearFeatureColor();
+      await threeBg?.restoreQueen();
 
       // Restore all reel columns to visible
       for (let col = 0; col < gridView.getCols(); col++) {

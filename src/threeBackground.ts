@@ -17,6 +17,12 @@ const FEATURE_COLORS: Record<string, THREE.Color> = {
   'T_DEATH':     new THREE.Color(0.9, 0.15, 0.1),   // Dark Red
 };
 
+/** JS-side smoothstep (0→1 for t in 0→1) */
+function smoothstepJS(t: number): number {
+  t = Math.max(0, Math.min(1, t));
+  return t * t * (3 - 2 * t);
+}
+
 export class ThreeBackground {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -39,17 +45,33 @@ export class ThreeBackground {
   // FOND mesh (circular element to rotate on Z axis)
   private fondMesh: THREE.Object3D | null = null;
 
-  // Model swap support (e.g. Fool feature → jester model)
+  // Model swap support
   private mainModel: THREE.Object3D | null = null;
   private mainMixer: THREE.AnimationMixer | null = null;
-  private jesterModel: THREE.Object3D | null = null;  // Single jester model (left side)
-  private swapMixer: THREE.AnimationMixer | null = null;
-  private isSwapped: boolean = false;
 
-  // Jester slide animation state
-  private jesterTargetX: number = -10;   // Final resting X position
-  private jesterOffscreenX: number = -35; // Offscreen left X position
-  private jesterExitX: number = 0;        // Slides just behind the grid (center-ish) to fake exit
+  // Fool model (for Fool feature)
+  private foolModel: THREE.Object3D | null = null;
+  private foolMixer: THREE.AnimationMixer | null = null;
+  private isFoolSwapped: boolean = false;
+  private foolReady: boolean = false;
+  private foolBaseY: number = -3.5; // Base Y position for float animation
+  private foolHaloMat: THREE.MeshStandardMaterial | null = null; // Reference for glow animation
+  private foolAnimTime: number = 0;
+
+  // Sol model (appears during Cups feature only, right side)
+  private solModel: THREE.Object3D | null = null;
+  private solMixer: THREE.AnimationMixer | null = null;
+  private isSolSwapped: boolean = false;
+  private solReady: boolean = false; // True once model is fully compiled on GPU
+
+  // Sol glow effect (organic noisy sprite)
+  private solGlow: THREE.Sprite | null = null;
+
+  // Queen of Swords model (for High Priestess feature)
+  private queenModel: THREE.Object3D | null = null;
+  private queenMixer: THREE.AnimationMixer | null = null;
+  private isQueenSwapped: boolean = false;
+  private queenReady: boolean = false;
 
   
   constructor(options: ThreeBgOptions) {
@@ -63,10 +85,11 @@ export class ThreeBackground {
       alpha: true, // transparent so page bg shows if needed
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = false;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 0.85;
     this.syncSize();
 
     // ── Scene ──
@@ -79,31 +102,64 @@ export class ThreeBackground {
     this.camera.position.set(-4.5, 0.0, 36.5);
     this.camera.lookAt(0, 0, 0);
 
-    // ── Lighting: ambient base + symmetric directional lights for sculpted look ──
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    // ── Lighting: soft ambient + gentle directional lights ──
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
     this.scene.add(ambient);
 
-    // Left-side directional light
-    const dirLeft = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirLeft.position.set(-20, 5, 15);
+    // Left-side directional light (shadow-casting, softer)
+    const dirLeft = new THREE.DirectionalLight(0xffffff, 0.3);
+    dirLeft.position.set(-20, 10, 15);
+    dirLeft.castShadow = true;
+    dirLeft.shadow.mapSize.width = 2048;
+    dirLeft.shadow.mapSize.height = 2048;
+    dirLeft.shadow.camera.near = 0.5;
+    dirLeft.shadow.camera.far = 200;
+    dirLeft.shadow.camera.left = -60;
+    dirLeft.shadow.camera.right = 60;
+    dirLeft.shadow.camera.top = 60;
+    dirLeft.shadow.camera.bottom = -60;
+    dirLeft.shadow.bias = -0.001;
+    dirLeft.shadow.normalBias = 0.02;
+    dirLeft.shadow.radius = 4; // Soft blur on shadow edges
     this.scene.add(dirLeft);
 
-    // Right-side directional light (mirrored)
-    const dirRight = new THREE.DirectionalLight(0xffffff, 0.5);
-    dirRight.position.set(20, 5, 15);
+    // Right-side directional light (shadow-casting, softer, mirrored)
+    const dirRight = new THREE.DirectionalLight(0xffffff, 0.3);
+    dirRight.position.set(20, 10, 15);
+    dirRight.castShadow = true;
+    dirRight.shadow.mapSize.width = 2048;
+    dirRight.shadow.mapSize.height = 2048;
+    dirRight.shadow.camera.near = 0.5;
+    dirRight.shadow.camera.far = 200;
+    dirRight.shadow.camera.left = -60;
+    dirRight.shadow.camera.right = 60;
+    dirRight.shadow.camera.top = 60;
+    dirRight.shadow.camera.bottom = -60;
+    dirRight.shadow.bias = -0.001;
+    dirRight.shadow.normalBias = 0.02;
+    dirRight.shadow.radius = 4; // Soft blur on shadow edges
     this.scene.add(dirRight);
 
-    // Subtle top fill for depth on upper features
-    const dirTop = new THREE.DirectionalLight(0xffffff, 0.25);
-    dirTop.position.set(0, 20, 10);
+    // Subtle top fill for depth on upper features (no shadows)
+    const dirTop = new THREE.DirectionalLight(0xffffff, 0.15);
+    dirTop.position.set(0, 25, 10);
     this.scene.add(dirTop);
 
     // ── Background group ──
     this.bgGroup = new THREE.Group();
     this.scene.add(this.bgGroup);
 
-    // ── Load main model (always visible, swapped out during Fool feature) ──
+    // ── Load main model (always visible) ──
     this.loadModel(options.modelPath);
+
+    // ── Load fool model (appears during Fool feature) ──
+    this.loadFoolModel('/assets/3d/the_fool.glb');
+
+    // ── Load sol model (appears during Cups feature) ──
+    this.loadSolModel('/assets/3d/sol.glb');
+
+    // ── Load queen of swords model (appears during Priestess feature) ──
+    this.loadQueenModel('/assets/3d/the_queen_of_swords.glb');
 
     // ── Resize handling ──
     window.addEventListener('resize', () => this.onResize());
@@ -286,9 +342,29 @@ export class ThreeBackground {
     if (this.mainMixer) {
       this.mainMixer.update(delta * 3);
     }
-    // Jester mixer runs at 0.5× for a slower, eerie feel
-    if (this.swapMixer && this.isSwapped) {
-      this.swapMixer.update(delta * 0.5);
+    // Fool model mixer — tick whenever visible
+    if (this.foolMixer && this.foolModel?.visible) {
+      this.foolMixer.update(delta * 1.0);
+    }
+    // Fool float + halo glow animation
+    if (this.foolModel?.visible) {
+      this.foolAnimTime += delta;
+      // Gentle float up/down — small range, slow
+      const floatOffset = Math.sin(this.foolAnimTime * 0.8) * 0.3;
+      this.foolModel.position.y = this.foolBaseY + floatOffset;
+      // Halo glow pulse — opacity oscillates gently
+      if (this.foolHaloMat) {
+        const pulse = 0.15 + 0.12 * Math.sin(this.foolAnimTime * 1.5);
+        this.foolHaloMat.opacity = pulse;
+      }
+    }
+    // Sol model mixer — only tick when visible during Cups feature
+    if (this.solMixer && this.isSolSwapped) {
+      this.solMixer.update(delta * 1.0);
+    }
+    // Queen of Swords mixer — tick whenever the model is visible
+    if (this.queenMixer && this.queenModel?.visible) {
+      this.queenMixer.update(delta * 1.0);
     }
 
     // Rotate FOND mesh around Z axis
@@ -465,6 +541,8 @@ export class ThreeBackground {
       if ((child as THREE.Mesh).isMesh) {
         child.frustumCulled = true;
         const mesh = child as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
         const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 
         // Replace every material with a fresh opaque MeshStandardMaterial,
@@ -541,124 +619,307 @@ export class ThreeBackground {
   }
 
   /**
-   * Prepare a loaded GLTF model: remove unwanted meshes, apply shader.
+   * Apply engraved shader while preserving alpha maps, alpha test, and transparency
+   * from the original materials. Used for models with detailed textures (e.g. hair, clothing edges).
    */
-  private prepareModel(gltf: any, removeMeshNames: string[]): THREE.Object3D {
-    const model = gltf.scene;
+  private applyEngravedShaderPreserveAlpha(model: THREE.Object3D): void {
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.frustumCulled = true;
+        const mesh = child as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 
-    // Remove unwanted meshes/nodes
-    const toRemove: THREE.Object3D[] = [];
-    model.traverse((child: THREE.Object3D) => {
-      if (removeMeshNames.includes(child.name)) {
-        toRemove.push(child);
-        console.log(`🗑️ Removing mesh: "${child.name}"`);
+        const newMaterials: THREE.Material[] = [];
+        for (const oldMat of oldMaterials) {
+          const oldStd = oldMat as THREE.MeshStandardMaterial;
+          // Check if diffuse map uses alpha channel or if there's an explicit alpha map
+          const hasAlpha = oldStd.alphaMap || oldStd.transparent || (oldStd.alphaTest && oldStd.alphaTest > 0);
+          const newMat = new THREE.MeshStandardMaterial({
+            map: oldStd.map || null,
+            color: oldStd.color ? oldStd.color.clone() : new THREE.Color(0xffffff),
+            normalMap: oldStd.normalMap || null,
+            aoMap: oldStd.aoMap || null,
+            emissiveMap: oldStd.emissiveMap || null,
+            emissive: oldStd.emissive ? oldStd.emissive.clone() : new THREE.Color(0x000000),
+            alphaMap: oldStd.alphaMap || null,
+            alphaTest: oldStd.alphaTest || (hasAlpha ? 0.5 : 0),
+            transparent: oldStd.transparent || false,
+            opacity: oldStd.opacity !== undefined ? oldStd.opacity : 1.0,
+            metalness: 0,
+            roughness: 1.0,
+            depthWrite: true,
+            side: oldStd.side !== undefined ? oldStd.side : THREE.DoubleSide,
+            blending: THREE.NormalBlending,
+          });
+          newMaterials.push(newMat);
+          oldMat.dispose();
+        }
+        mesh.material = newMaterials.length === 1 ? newMaterials[0] : newMaterials;
+
+        for (const mat of newMaterials) {
+          mat.onBeforeCompile = (shader) => {
+            shader.uniforms.featureColor = this.featureColorUniform;
+            shader.uniforms.featureIntensity = this.featureIntensityUniform;
+            shader.uniforms.featureOrigin = this.featureOriginUniform;
+
+            shader.fragmentShader = `uniform vec3 featureColor;\nuniform float featureIntensity;\nuniform vec3 featureOrigin;\n#define APPLY_FEATURE_COLOR 1\n` + shader.fragmentShader;
+
+            shader.vertexShader = 'varying vec3 vWorldPos;\n' + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <worldpos_vertex>',
+              `#include <worldpos_vertex>
+              vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+            );
+            shader.fragmentShader = 'varying vec3 vWorldPos;\n' + shader.fragmentShader;
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <dithering_fragment>',
+              `
+              #include <dithering_fragment>
+              float gray = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+              gray = clamp(gray * 2.5, 0.0, 1.0);
+              gray = pow(gray, 0.7);
+              gray = smoothstep(0.05, 0.95, gray);
+              float dx = dFdx(gray);
+              float dy = dFdy(gray);
+              float edge = sqrt(dx * dx + dy * dy);
+              edge = smoothstep(0.02, 0.08, edge);
+              gray = gray * (1.0 - edge * 0.4);
+              vec2 uv = gl_FragCoord.xy;
+              float noise = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+              noise = (noise - 0.5) * 0.04;
+              gray = clamp(gray + noise, 0.0, 1.0);
+              vec3 grayVec = vec3(gray);
+              float darkMask = 1.0 - smoothstep(0.1, 0.85, gray);
+              vec3 tinted = mix(grayVec, grayVec * featureColor * 2.15, darkMask * 0.6);
+              float dist = length(vWorldPos - featureOrigin);
+              float spreadRadius = featureIntensity * 80.0;
+              float spreadMask = 1.0 - smoothstep(spreadRadius * 0.6, spreadRadius, dist);
+              gl_FragColor.rgb = mix(grayVec, tinted, spreadMask * featureIntensity);
+              `
+            );
+          };
+        }
       }
     });
-    for (const obj of toRemove) {
-      obj.removeFromParent();
-    }
-
-    // Apply the engraved grayscale + feature color shader
-    this.applyEngravedShader(model);
-
-    return model;
   }
 
   /**
-   * Bring in the jester model from the left side with a slide animation.
-   * Ancient woman stays visible throughout.
-   * @param modelPath - Path to the jester GLB model
-   * @param removeMeshNames - Mesh/node names to remove from the loaded model (e.g. ['Plane001'])
+   * Load the sol.glb model as a second always-present model.
+   * Creates a debug slider panel for adjusting position, rotation, and scale.
    */
-  swapToModel(modelPath: string, removeMeshNames: string[] = []): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // If already swapped, just resolve
-      if (this.isSwapped && this.jesterModel) {
+  private loadSolModel(path: string): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // Remove unwanted meshes (like Plane001 if present)
+        const toRemove: THREE.Object3D[] = [];
+        model.traverse((child: THREE.Object3D) => {
+          if (child.name === 'Plane001') {
+            toRemove.push(child);
+          }
+          if ((child as THREE.Mesh).isMesh) {
+            console.log(`📦 Sol mesh: "${child.name}"`);
+          }
+        });
+        for (const obj of toRemove) obj.removeFromParent();
+
+        // Apply the engraved shader
+        this.applyEngravedShader(model);
+
+        // Darken sol materials slightly to prevent white bloom
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              const stdMat = mat as THREE.MeshStandardMaterial;
+              if (stdMat.color) {
+                stdMat.color.multiplyScalar(0.55);
+                stdMat.needsUpdate = true;
+              }
+            }
+          }
+        });
+
+        // Hardcoded transform values — starts hidden
+        model.position.set(-17.0, 1.5, -5.5);
+        model.rotation.set(0.15, 0.21, -0.03);
+        model.scale.setScalar(0.1);
+        model.visible = false;
+
+        // Create organic glow sprite at sol's position for entrance/exit effect
+        const glowTexture = this.generateGlowTexture();
+        const glowMat = new THREE.SpriteMaterial({
+          map: glowTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const glowSprite = new THREE.Sprite(glowMat);
+        glowSprite.position.copy(model.position);
+        glowSprite.scale.setScalar(0.1);
+        glowSprite.visible = false;
+        this.bgGroup.add(glowSprite);
+        this.solGlow = glowSprite;
+
+        this.bgGroup.add(model);
+        this.solModel = model;
+
+        // Set up animations if available
+        if (gltf.animations && gltf.animations.length > 0) {
+          this.solMixer = new THREE.AnimationMixer(model);
+          for (const clip of gltf.animations) {
+            this.solMixer.clipAction(clip).play();
+          }
+          console.log(`🎬 Sol: ${gltf.animations.length} animation(s)`);
+        }
+
+        // Pre-compile: render the model once (fully opaque, off-camera) to warm the GPU
+        // This prevents the see-through glitch on first appearance
+        model.visible = true;
+        this.renderer.compile(this.scene, this.camera);
+        this.renderer.render(this.scene, this.camera);
+        model.visible = false;
+        this.solReady = true;
+
+        console.log(`✅ Sol model loaded & pre-compiled: ${path}`);
+      },
+      undefined,
+      (error) => {
+        console.error('❌ Failed to load Sol model:', error);
+      }
+    );
+  }
+
+  /**
+   * Load the queen of swords model for the High Priestess feature.
+   */
+  private loadQueenModel(path: string): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // Log all meshes and their materials for debugging
+        model.traverse((child: THREE.Object3D) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              const stdMat = mat as THREE.MeshStandardMaterial;
+              console.log(`📦 Queen mesh: "${child.name}" | mat: "${mat.name}" | map: ${!!stdMat.map} | alphaMap: ${!!(stdMat as any).alphaMap} | alphaTest: ${(stdMat as any).alphaTest} | transparent: ${mat.transparent} | opacity: ${mat.opacity}`);
+            }
+          }
+        });
+
+        // Apply the engraved shader — preserve alpha maps for proper textures
+        this.applyEngravedShaderPreserveAlpha(model);
+
+        // No extra darkening — let the engraved shader + scene lighting
+        // handle contrast naturally, same as the ancient woman model
+
+        // Transform values — still visible for adjustments
+        model.position.set(-19.0, -5.0, -6.5);
+        model.rotation.set(0.06, 0.00, 0.00);
+        model.scale.setScalar(0.1);
+        model.visible = false; // Hidden by default, shown during Priestess feature
+
+        this.bgGroup.add(model);
+        this.queenModel = model;
+
+        // Set up animations — log durations and clamp to useful range
+        if (gltf.animations && gltf.animations.length > 0) {
+          this.queenMixer = new THREE.AnimationMixer(model);
+          for (const clip of gltf.animations) {
+            console.log(`🎬 Queen clip: "${clip.name}" duration: ${clip.duration.toFixed(2)}s tracks: ${clip.tracks.length}`);
+            const action = this.queenMixer.clipAction(clip);
+            action.setLoop(THREE.LoopPingPong, Infinity);
+            action.play();
+          }
+          console.log(`🎬 Queen: ${gltf.animations.length} animation(s)`);
+        }
+
+        // Store target scale for entrance animation
+        model.userData.targetScale = 0.1;
+
+        // Pre-compile to avoid first-frame glitches
+        model.visible = true;
+        this.renderer.compile(this.scene, this.camera);
+        this.renderer.render(this.scene, this.camera);
+        model.visible = false;
+        this.queenReady = true;
+
+        console.log(`✅ Queen of Swords model loaded & pre-compiled: ${path}`);
+      },
+      undefined,
+      (error) => {
+        console.error('❌ Failed to load Queen model:', error);
+      }
+    );
+  }
+
+  /**
+   * Bring in queen of swords for the High Priestess feature — scales up.
+   */
+  swapToQueen(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.isQueenSwapped && this.queenModel) {
         resolve();
         return;
       }
 
-      // If jester was previously loaded, reuse it — animate entrance
-      if (this.jesterModel) {
-        this.animateJesterEntrance().then(resolve);
+      if (!this.queenReady || !this.queenModel) {
+        console.warn('⏳ Queen model not ready yet, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.queenReady && this.queenModel) {
+            clearInterval(checkInterval);
+            this.animateQueenEntrance().then(resolve);
+          }
+        }, 100);
         return;
       }
 
-      const loader = new GLTFLoader();
-
-      const loadOne = (): Promise<{ scene: THREE.Object3D; animations: THREE.AnimationClip[] }> =>
-        new Promise((res, rej) => {
-          loader.load(
-            modelPath,
-            (gltf) => res({ scene: gltf.scene, animations: gltf.animations || [] }),
-            undefined,
-            (error) => rej(error)
-          );
-        });
-
-      loadOne()
-        .then((gltf1) => {
-          // ── Single jester (left side) ──
-          const model = this.prepareModel(gltf1, removeMeshNames);
-          model.position.set(this.jesterOffscreenX, -3.5, 13.5); // Start offscreen left
-          model.rotation.set(0, 0, 9.0 * Math.PI / 180);
-          model.scale.set(-4.480, 4.480, 4.480); // Flip X axis to face right
-          model.visible = false;
-
-          this.bgGroup.add(model);
-          this.jesterModel = model;
-
-          // Set up animations
-          if (gltf1.animations.length > 0) {
-            this.swapMixer = new THREE.AnimationMixer(model);
-            for (const clip of gltf1.animations) {
-              this.swapMixer.clipAction(clip).play();
-            }
-            console.log(`🎬 Jester: ${gltf1.animations.length} animation(s)`);
-          }
-
-          console.log(`✅ Jester model loaded: ${modelPath}`);
-
-          // Animate entrance
-          this.animateJesterEntrance().then(resolve);
-        })
-        .catch((error) => {
-          console.error('❌ Failed to load jester model:', error);
-          reject(error);
-        });
+      this.animateQueenEntrance().then(resolve);
     });
   }
 
-  /** Animate jester sliding in from the left */
-  private animateJesterEntrance(): Promise<void> {
+  /** Animate queen scaling up from nothing */
+  private animateQueenEntrance(): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.jesterModel) { resolve(); return; }
+      if (!this.queenModel) { resolve(); return; }
 
-      const model = this.jesterModel;
-      model.position.x = this.jesterOffscreenX;
+      const model = this.queenModel;
+      const targetScale = model.userData.targetScale || model.scale.x;
+      model.scale.setScalar(0.01);
       model.visible = true;
-      this.isSwapped = true;
+      this.isQueenSwapped = true;
 
-      const startX = this.jesterOffscreenX;
-      const endX = this.jesterTargetX;
-      const duration = 800; // ms
+      const duration = 1000; // ms
       const startTime = performance.now();
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        // Ease out back for a playful overshoot
         const c1 = 1.70158;
         const c3 = c1 + 1;
         const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 
-        model.position.x = startX + (endX - startX) * eased;
+        model.scale.setScalar(targetScale * eased);
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
-          model.position.x = endX;
-          console.log('🃏 Jester slid in from the left');
+          model.scale.setScalar(targetScale);
+          console.log('⚔️ Queen of Swords appeared');
           resolve();
         }
       };
@@ -666,40 +927,436 @@ export class ThreeBackground {
     });
   }
 
-  /** Animate jester sliding out to the right, then hide */
-  restoreModel(): Promise<void> {
+  /** Animate queen shrinking away, then hide */
+  restoreQueen(): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.isSwapped || !this.jesterModel) {
+      if (!this.isQueenSwapped || !this.queenModel) {
         resolve();
         return;
       }
 
-      const model = this.jesterModel;
-      const startX = model.position.x;
-      const endX = this.jesterExitX;
+      const model = this.queenModel;
+      const startScale = model.scale.x;
       const duration = 600; // ms
       const startTime = performance.now();
 
       const animate = (now: number) => {
         const elapsed = now - startTime;
         const t = Math.min(elapsed / duration, 1);
-        // Ease in quad — accelerates out
-        const eased = t * t;
+        const eased = t * t * t;
 
-        model.position.x = startX + (endX - startX) * eased;
+        model.scale.setScalar(startScale * (1 - eased));
 
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
           model.visible = false;
-          model.position.x = this.jesterOffscreenX; // Reset for next entrance
-          this.isSwapped = false;
-          console.log('🃏 Jester slid out to the right');
+          model.scale.setScalar(startScale); // Reset for next use
+          this.isQueenSwapped = false;
+          console.log('⚔️ Queen of Swords disappeared');
           resolve();
         }
       };
       requestAnimationFrame(animate);
     });
+  }
+
+  /**
+   * Load the fool model for the Fool feature.
+   */
+  private loadFoolModel(path: string): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // Log all meshes
+        model.traverse((child: THREE.Object3D) => {
+          if ((child as THREE.Mesh).isMesh) {
+            console.log(`📦 Fool mesh: "${child.name}"`);
+          }
+        });
+
+        // Apply the engraved shader with alpha preservation
+        this.applyEngravedShaderPreserveAlpha(model);
+
+        // Darken to reduce bloom + make HaloRed mesh very transparent
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              const stdMat = mat as THREE.MeshStandardMaterial;
+              if (child.name.includes('HaloRed') || child.name.includes('haloRed') || child.name.includes('Halo')) {
+                console.log(`🔴 Found halo mesh: "${child.name}" — white glow`);
+                this.foolHaloMat = stdMat; // Save reference for glow animation
+                stdMat.color = new THREE.Color(1.0, 1.0, 1.0);
+                stdMat.emissive = new THREE.Color(0.3, 0.3, 0.3);
+                stdMat.transparent = true;
+                stdMat.opacity = 0.25;
+                stdMat.depthWrite = false;
+                stdMat.blending = THREE.AdditiveBlending;
+                // White glow: filled center with soft faded edges
+                stdMat.onBeforeCompile = (shader) => {
+                  shader.vertexShader = 'varying vec2 vUv;\n' + shader.vertexShader;
+                  shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    '#include <begin_vertex>\nvUv = uv;'
+                  );
+                  shader.fragmentShader = 'varying vec2 vUv;\n' + shader.fragmentShader;
+                  shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <dithering_fragment>',
+                    `#include <dithering_fragment>
+                    // White glow: solid fill in center, soft fade at edges
+                    float dist = length(vUv - vec2(0.5));
+                    float glow = 1.0 - smoothstep(0.15, 0.5, dist);
+                    gl_FragColor.rgb = vec3(1.0); // Force white
+                    gl_FragColor.a *= glow;
+                    `
+                  );
+                };
+                stdMat.needsUpdate = true;
+              } else if (stdMat.color) {
+                stdMat.color.multiplyScalar(0.55);
+                stdMat.needsUpdate = true;
+              }
+            }
+          }
+        });
+
+        // Hardcoded transform values
+        model.position.set(-11.5, -3.5, 12.5);
+        model.rotation.set(0.00, 0.49, -0.00);
+        model.scale.setScalar(4.4);
+        model.visible = true; // Kept visible for further adjustments
+
+        this.bgGroup.add(model);
+        this.foolModel = model;
+
+        // Set up animations with ping-pong
+        if (gltf.animations && gltf.animations.length > 0) {
+          this.foolMixer = new THREE.AnimationMixer(model);
+          for (const clip of gltf.animations) {
+            console.log(`🎬 Fool clip: "${clip.name}" duration: ${clip.duration.toFixed(2)}s`);
+            const action = this.foolMixer.clipAction(clip);
+            action.setLoop(THREE.LoopPingPong, Infinity);
+            action.play();
+          }
+          console.log(`🎬 Fool: ${gltf.animations.length} animation(s)`);
+        }
+
+        console.log(`✅ Fool model loaded: ${path}`);
+      },
+      undefined,
+      (error) => {
+        console.error('❌ Failed to load Fool model:', error);
+      }
+    );
+  }
+
+  /**
+   * Bring in the fool model for the Fool feature — scales up.
+   */
+  swapToModel(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.isFoolSwapped && this.foolModel) {
+        resolve();
+        return;
+      }
+
+      if (!this.foolReady || !this.foolModel) {
+        console.warn('⏳ Fool model not ready yet, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.foolReady && this.foolModel) {
+            clearInterval(checkInterval);
+            this.animateFoolEntrance().then(resolve);
+          }
+        }, 100);
+        return;
+      }
+
+      this.animateFoolEntrance().then(resolve);
+    });
+  }
+
+  /** Animate fool scaling up from nothing */
+  private animateFoolEntrance(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.foolModel) { resolve(); return; }
+
+      const model = this.foolModel;
+      const targetScale = model.userData.targetScale || model.scale.x;
+      model.scale.setScalar(0.01);
+      model.visible = true;
+      this.isFoolSwapped = true;
+
+      const duration = 1000;
+      const startTime = performance.now();
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+
+        model.scale.setScalar(targetScale * eased);
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          model.scale.setScalar(targetScale);
+          console.log('🃏 Fool appeared');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /** Animate fool shrinking away, then hide */
+  restoreModel(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isFoolSwapped || !this.foolModel) {
+        resolve();
+        return;
+      }
+
+      const model = this.foolModel;
+      const startScale = model.scale.x;
+      const duration = 600;
+      const startTime = performance.now();
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const eased = t * t * t;
+
+        model.scale.setScalar(startScale * (1 - eased));
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          model.visible = false;
+          model.scale.setScalar(startScale);
+          this.isFoolSwapped = false;
+          console.log('🃏 Fool disappeared');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Bring in the sol model for the Cups feature — drops in from above.
+   * Ancient woman stays visible throughout.
+   */
+  swapToSol(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.isSolSwapped && this.solModel) {
+        resolve();
+        return;
+      }
+
+      if (!this.solReady || !this.solModel) {
+        // Sol not loaded/compiled yet — wait until ready
+        console.warn('⏳ Sol model not ready yet, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.solReady && this.solModel) {
+            clearInterval(checkInterval);
+            this.animateSolEntrance().then(resolve);
+          }
+        }, 100);
+        return;
+      }
+
+      this.animateSolEntrance().then(resolve);
+    });
+  }
+
+  /**
+   * Animate sol entrance: glow builds up, model pops in fully opaque behind glow,
+   * then glow fades to reveal the solid model. No transparency on the model at all.
+   */
+  private animateSolEntrance(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.solModel || !this.solGlow) { resolve(); return; }
+
+      const model = this.solModel;
+      const glow = this.solGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      // Phase 1 (0→0.35): Glow grows and brightens. Model stays hidden.
+      // Phase 2 (0.35→1.0): Model pops in. Glow lingers and fades very gradually.
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+      model.visible = false;
+      this.isSolSwapped = true;
+
+      const duration = 1800; // ms — longer for smoother fade
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.35) {
+          // Phase 1: Glow grows and brightens — model still hidden
+          const p = t / 0.35;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          // Pop the model in fully opaque behind the bright glow
+          if (!model.visible) {
+            model.visible = true;
+          }
+          // Phase 2: Glow fades out very gradually over a long tail
+          const p = (t - 0.35) / 0.65;
+          // Slow ease — stays bright longer, then gently fades
+          const eased = p * p * p; // cubic ease-in for gentle start, faster end
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.6));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = true;
+          console.log('☀️ Sol materialized from glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Animate sol exit: glow expands over the model, model hides behind glow,
+   * then glow fades away. No transparency on the model.
+   */
+  restoreSol(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isSolSwapped || !this.solModel || !this.solGlow) {
+        resolve();
+        return;
+      }
+
+      const model = this.solModel;
+      const glow = this.solGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(1);
+      glowMat.opacity = 0;
+
+      const duration = 900; // ms
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.4) {
+          // Phase 1: Glow grows and brightens over the model
+          const p = t / 0.4;
+          const eased = p * p;
+          glow.scale.setScalar(1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          // Hide model behind the bright glow
+          if (model.visible) {
+            model.visible = false;
+          }
+          // Phase 2: Glow shrinks and fades away
+          const p = (t - 0.4) / 0.6;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.85));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = false;
+          this.isSolSwapped = false;
+          console.log('☀️ Sol dissolved into glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Generate a procedural noisy glow texture — organic, undefined edges.
+   * Uses layered radial gradients with noise distortion.
+   */
+  private generateGlowTexture(): THREE.Texture {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    const cx = size / 2;
+    const cy = size / 2;
+
+    // Clear
+    ctx.clearRect(0, 0, size, size);
+
+    // Draw multiple offset radial gradients with varying sizes for organic feel
+    const layers = 12;
+    for (let i = 0; i < layers; i++) {
+      // Random offset from center
+      const ox = cx + (Math.random() - 0.5) * size * 0.15;
+      const oy = cy + (Math.random() - 0.5) * size * 0.15;
+      const radius = size * (0.25 + Math.random() * 0.25);
+
+      const grad = ctx.createRadialGradient(ox, oy, 0, ox, oy, radius);
+      grad.addColorStop(0, `rgba(255, 255, 255, ${0.15 + Math.random() * 0.1})`);
+      grad.addColorStop(0.3 + Math.random() * 0.2, `rgba(255, 255, 240, ${0.08 + Math.random() * 0.05})`);
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+    }
+
+    // Add pixel noise for grittiness
+    const imageData = ctx.getImageData(0, 0, size, size);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const px = (i / 4) % size;
+      const py = Math.floor((i / 4) / size);
+      const distFromCenter = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2) / (size / 2);
+
+      // Noise that fades with distance
+      const noise = (Math.random() - 0.5) * 40 * (1 - distFromCenter);
+      data[i] = Math.min(255, Math.max(0, data[i] + noise));
+      data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise));
+      data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise));
+
+      // Feather alpha at edges with irregular falloff
+      if (distFromCenter > 0.6) {
+        const edgeFade = 1 - smoothstepJS((distFromCenter - 0.6) / 0.4);
+        const irregularity = 0.7 + Math.random() * 0.3;
+        data[i + 3] = Math.floor(data[i + 3] * edgeFade * irregularity);
+      }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
   }
 
 
