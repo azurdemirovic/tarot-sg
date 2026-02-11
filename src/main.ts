@@ -129,6 +129,7 @@ async function init() {
           animate: DEBUG.BG_ANIMATE_CAMERA,
         });
         console.log('✅ Three.js 3D background initialized');
+
       }
     }
   } catch (error) {
@@ -255,6 +256,9 @@ async function handleSpin() {
       spinBtn.disabled = true; // Lock button during reveal
       threeBg?.setFeatureColor('T_FOOL');
 
+      // Swap 3D model to nightmare jester
+      await threeBg?.swapToModel('/assets/3d/nightmare_jester.glb', ['Plane001']);
+
       const foolReveal = new FoolRevealAnimation(
         gridView,
         gridView.getReelSpinners(),
@@ -277,6 +281,7 @@ async function handleSpin() {
         gameController.betAmount
       );
       threeBg?.clearFeatureColor();
+      await threeBg?.restoreModel();
     }
 
     // ── Phase 2b: If a Cups feature triggered, play the multiplier collection animation ──

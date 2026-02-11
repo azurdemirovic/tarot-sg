@@ -25,7 +25,6 @@ export class ThreeBackground {
   private clock: THREE.Clock;
   private _animateCamera: boolean; // Reserved for future camera animation
   private animationId: number = 0;
-  private mixer: THREE.AnimationMixer | null = null;
   
   // Feature color tinting
   private featureColorUniform = { value: new THREE.Color(0, 0, 0) }; // Black = no color
@@ -39,6 +38,18 @@ export class ThreeBackground {
 
   // FOND mesh (circular element to rotate on Z axis)
   private fondMesh: THREE.Object3D | null = null;
+
+  // Model swap support (e.g. Fool feature → jester model)
+  private mainModel: THREE.Object3D | null = null;
+  private mainMixer: THREE.AnimationMixer | null = null;
+  private jesterModel: THREE.Object3D | null = null;  // Single jester model (left side)
+  private swapMixer: THREE.AnimationMixer | null = null;
+  private isSwapped: boolean = false;
+
+  // Jester slide animation state
+  private jesterTargetX: number = -10;   // Final resting X position
+  private jesterOffscreenX: number = -35; // Offscreen left X position
+  private jesterExitX: number = 0;        // Slides just behind the grid (center-ish) to fake exit
 
   
   constructor(options: ThreeBgOptions) {
@@ -68,15 +79,30 @@ export class ThreeBackground {
     this.camera.position.set(-4.5, 0.0, 36.5);
     this.camera.lookAt(0, 0, 0);
 
-    // ── Lighting: even ambient only (directional key removed — was causing bright strip on right border) ──
-    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+    // ── Lighting: ambient base + symmetric directional lights for sculpted look ──
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambient);
+
+    // Left-side directional light
+    const dirLeft = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLeft.position.set(-20, 5, 15);
+    this.scene.add(dirLeft);
+
+    // Right-side directional light (mirrored)
+    const dirRight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirRight.position.set(20, 5, 15);
+    this.scene.add(dirRight);
+
+    // Subtle top fill for depth on upper features
+    const dirTop = new THREE.DirectionalLight(0xffffff, 0.25);
+    dirTop.position.set(0, 20, 10);
+    this.scene.add(dirTop);
 
     // ── Background group ──
     this.bgGroup = new THREE.Group();
     this.scene.add(this.bgGroup);
 
-    // ── Load model ──
+    // ── Load main model (always visible, swapped out during Fool feature) ──
     this.loadModel(options.modelPath);
 
     // ── Resize handling ──
@@ -197,15 +223,38 @@ export class ThreeBackground {
         });
 
         this.bgGroup.add(model);
+        this.mainModel = model;
 
-        // Position the model
-        this.bgGroup.position.set(11.5, 0.5, 12.0);
+        // Position the main model (not bgGroup, so swap models keep their own positions)
+        model.position.set(11.5, 0.5, 12.0);
+
+        // Detach FOND mesh from the main model so it stays visible during model swaps.
+        // We need to update the matrix first so world transform is computed, then reparent.
+        if (this.fondMesh) {
+          model.updateMatrixWorld(true);
+          // Reparent FOND to bgGroup while preserving its world transform
+          const fond = this.fondMesh;
+          const worldPos = new THREE.Vector3();
+          const worldQuat = new THREE.Quaternion();
+          const worldScale = new THREE.Vector3();
+          fond.getWorldPosition(worldPos);
+          fond.getWorldQuaternion(worldQuat);
+          fond.getWorldScale(worldScale);
+
+          fond.removeFromParent();
+          this.bgGroup.add(fond);
+          fond.position.copy(worldPos);
+          fond.quaternion.copy(worldQuat);
+          fond.scale.copy(worldScale);
+
+          console.log('🔄 FOND mesh reparented to bgGroup — will persist across model swaps');
+        }
 
         // ── Play animations if available ──
         if (gltf.animations && gltf.animations.length > 0) {
-          this.mixer = new THREE.AnimationMixer(model);
+          this.mainMixer = new THREE.AnimationMixer(model);
           for (const clip of gltf.animations) {
-            const action = this.mixer.clipAction(clip);
+            const action = this.mainMixer.clipAction(clip);
             action.play();
           }
           console.log(`🎬 Playing ${gltf.animations.length} animation(s): ${gltf.animations.map(a => a.name || 'unnamed').join(', ')}`);
@@ -233,9 +282,13 @@ export class ThreeBackground {
 
     const delta = this.clock.getDelta();
 
-    // Tick animation mixer
-    if (this.mixer) {
-      this.mixer.update(delta*3);
+    // Tick animation mixers — main model always runs
+    if (this.mainMixer) {
+      this.mainMixer.update(delta * 3);
+    }
+    // Jester mixer runs at 0.5× for a slower, eerie feel
+    if (this.swapMixer && this.isSwapped) {
+      this.swapMixer.update(delta * 0.5);
     }
 
     // Rotate FOND mesh around Z axis
@@ -403,6 +456,252 @@ export class ThreeBackground {
       tearCanvas.remove();
     }
   }
+
+  /**
+   * Apply the engraved grayscale + feature color shader to all meshes in a model.
+   */
+  private applyEngravedShader(model: THREE.Object3D): void {
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.frustumCulled = true;
+        const mesh = child as THREE.Mesh;
+        const oldMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+
+        // Replace every material with a fresh opaque MeshStandardMaterial,
+        // preserving only the diffuse map (color texture) for the engraved shader.
+        const newMaterials: THREE.Material[] = [];
+        for (const oldMat of oldMaterials) {
+          const oldStd = oldMat as THREE.MeshStandardMaterial;
+          const newMat = new THREE.MeshStandardMaterial({
+            map: oldStd.map || null,           // keep diffuse texture
+            color: oldStd.color ? oldStd.color.clone() : new THREE.Color(0xffffff),
+            normalMap: oldStd.normalMap || null,
+            metalness: 0,
+            roughness: 1.0,
+            transparent: false,
+            opacity: 1.0,
+            depthWrite: true,
+            side: THREE.FrontSide,
+            alphaTest: 0,
+            blending: THREE.NormalBlending,
+          });
+          newMaterials.push(newMat);
+          oldMat.dispose(); // free old material
+        }
+        mesh.material = newMaterials.length === 1 ? newMaterials[0] : newMaterials;
+
+        const materials = newMaterials;
+
+        for (const mat of materials) {
+          mat.onBeforeCompile = (shader) => {
+            shader.uniforms.featureColor = this.featureColorUniform;
+            shader.uniforms.featureIntensity = this.featureIntensityUniform;
+            shader.uniforms.featureOrigin = this.featureOriginUniform;
+
+            shader.fragmentShader = `uniform vec3 featureColor;\nuniform float featureIntensity;\nuniform vec3 featureOrigin;\n#define APPLY_FEATURE_COLOR 1\n` + shader.fragmentShader;
+
+            shader.vertexShader = 'varying vec3 vWorldPos;\n' + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <worldpos_vertex>',
+              `#include <worldpos_vertex>
+              vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+            );
+            shader.fragmentShader = 'varying vec3 vWorldPos;\n' + shader.fragmentShader;
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <dithering_fragment>',
+              `
+              #include <dithering_fragment>
+              float gray = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+              gray = clamp(gray * 2.5, 0.0, 1.0);
+              gray = pow(gray, 0.7);
+              gray = smoothstep(0.05, 0.95, gray);
+              float dx = dFdx(gray);
+              float dy = dFdy(gray);
+              float edge = sqrt(dx * dx + dy * dy);
+              edge = smoothstep(0.02, 0.08, edge);
+              gray = gray * (1.0 - edge * 0.4);
+              vec2 uv = gl_FragCoord.xy;
+              float noise = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+              noise = (noise - 0.5) * 0.04;
+              gray = clamp(gray + noise, 0.0, 1.0);
+              vec3 grayVec = vec3(gray);
+              float darkMask = 1.0 - smoothstep(0.1, 0.85, gray);
+              vec3 tinted = mix(grayVec, grayVec * featureColor * 2.15, darkMask * 0.6);
+              float dist = length(vWorldPos - featureOrigin);
+              float spreadRadius = featureIntensity * 80.0;
+              float spreadMask = 1.0 - smoothstep(spreadRadius * 0.6, spreadRadius, dist);
+              gl_FragColor.rgb = mix(grayVec, tinted, spreadMask * featureIntensity);
+              `
+            );
+          };
+        }
+      }
+    });
+  }
+
+  /**
+   * Prepare a loaded GLTF model: remove unwanted meshes, apply shader.
+   */
+  private prepareModel(gltf: any, removeMeshNames: string[]): THREE.Object3D {
+    const model = gltf.scene;
+
+    // Remove unwanted meshes/nodes
+    const toRemove: THREE.Object3D[] = [];
+    model.traverse((child: THREE.Object3D) => {
+      if (removeMeshNames.includes(child.name)) {
+        toRemove.push(child);
+        console.log(`🗑️ Removing mesh: "${child.name}"`);
+      }
+    });
+    for (const obj of toRemove) {
+      obj.removeFromParent();
+    }
+
+    // Apply the engraved grayscale + feature color shader
+    this.applyEngravedShader(model);
+
+    return model;
+  }
+
+  /**
+   * Bring in the jester model from the left side with a slide animation.
+   * Ancient woman stays visible throughout.
+   * @param modelPath - Path to the jester GLB model
+   * @param removeMeshNames - Mesh/node names to remove from the loaded model (e.g. ['Plane001'])
+   */
+  swapToModel(modelPath: string, removeMeshNames: string[] = []): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // If already swapped, just resolve
+      if (this.isSwapped && this.jesterModel) {
+        resolve();
+        return;
+      }
+
+      // If jester was previously loaded, reuse it — animate entrance
+      if (this.jesterModel) {
+        this.animateJesterEntrance().then(resolve);
+        return;
+      }
+
+      const loader = new GLTFLoader();
+
+      const loadOne = (): Promise<{ scene: THREE.Object3D; animations: THREE.AnimationClip[] }> =>
+        new Promise((res, rej) => {
+          loader.load(
+            modelPath,
+            (gltf) => res({ scene: gltf.scene, animations: gltf.animations || [] }),
+            undefined,
+            (error) => rej(error)
+          );
+        });
+
+      loadOne()
+        .then((gltf1) => {
+          // ── Single jester (left side) ──
+          const model = this.prepareModel(gltf1, removeMeshNames);
+          model.position.set(this.jesterOffscreenX, -3.5, 13.5); // Start offscreen left
+          model.rotation.set(0, 0, 9.0 * Math.PI / 180);
+          model.scale.set(-4.480, 4.480, 4.480); // Flip X axis to face right
+          model.visible = false;
+
+          this.bgGroup.add(model);
+          this.jesterModel = model;
+
+          // Set up animations
+          if (gltf1.animations.length > 0) {
+            this.swapMixer = new THREE.AnimationMixer(model);
+            for (const clip of gltf1.animations) {
+              this.swapMixer.clipAction(clip).play();
+            }
+            console.log(`🎬 Jester: ${gltf1.animations.length} animation(s)`);
+          }
+
+          console.log(`✅ Jester model loaded: ${modelPath}`);
+
+          // Animate entrance
+          this.animateJesterEntrance().then(resolve);
+        })
+        .catch((error) => {
+          console.error('❌ Failed to load jester model:', error);
+          reject(error);
+        });
+    });
+  }
+
+  /** Animate jester sliding in from the left */
+  private animateJesterEntrance(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.jesterModel) { resolve(); return; }
+
+      const model = this.jesterModel;
+      model.position.x = this.jesterOffscreenX;
+      model.visible = true;
+      this.isSwapped = true;
+
+      const startX = this.jesterOffscreenX;
+      const endX = this.jesterTargetX;
+      const duration = 800; // ms
+      const startTime = performance.now();
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        // Ease out back for a playful overshoot
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+
+        model.position.x = startX + (endX - startX) * eased;
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          model.position.x = endX;
+          console.log('🃏 Jester slid in from the left');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /** Animate jester sliding out to the right, then hide */
+  restoreModel(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isSwapped || !this.jesterModel) {
+        resolve();
+        return;
+      }
+
+      const model = this.jesterModel;
+      const startX = model.position.x;
+      const endX = this.jesterExitX;
+      const duration = 600; // ms
+      const startTime = performance.now();
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        // Ease in quad — accelerates out
+        const eased = t * t;
+
+        model.position.x = startX + (endX - startX) * eased;
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          model.visible = false;
+          model.position.x = this.jesterOffscreenX; // Reset for next entrance
+          this.isSwapped = false;
+          console.log('🃏 Jester slid out to the right');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
 
   dispose(): void {
     cancelAnimationFrame(this.animationId);

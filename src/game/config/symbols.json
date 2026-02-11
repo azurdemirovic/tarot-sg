@@ -108,7 +108,7 @@
       "id": "T_FOOL",
       "tier": "TAROT",
       "filename": "T_FOOL.jpg",
-      "baseWeight": 0,
+      "baseWeight": 10,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },
@@ -132,7 +132,7 @@
       "id": "T_PRIESTESS",
       "tier": "TAROT",
       "filename": "T_PRIESTESS.jpg",
-      "baseWeight": 10,
+      "baseWeight": 0,
       "payValues": [0, 0, 30, 60, 150],
       "isTarot": true
     },
