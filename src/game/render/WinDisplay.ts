@@ -62,6 +62,12 @@ export class WinDisplay {
    * @param threshold  Multiplier of bet to trigger display (default: 10)
    * @param holdMs     How long to hold the display (default: 1500)
    */
+  /**
+   * Optional callback to run before the win display appears (e.g. outline winning symbols).
+   * Set this before calling show() or showAlways().
+   */
+  onBeforeShow: (() => Promise<void>) | null = null;
+
   async show(
     wins: { payout: number }[],
     multiplier: number,
@@ -75,6 +81,12 @@ export class WinDisplay {
     if (wins.length === 0 || totalWin <= betAmount * threshold) return;
 
     this.betAmount = betAmount;
+
+    // Run pre-show callback (e.g. outline winning symbols)
+    if (this.onBeforeShow) {
+      await this.onBeforeShow();
+    }
+
     this.parent.addChild(this.overlay);
 
     try {
@@ -102,6 +114,12 @@ export class WinDisplay {
     if (wins.length === 0 || totalWin <= 0) return;
 
     this.betAmount = betAmount;
+
+    // Run pre-show callback (e.g. outline winning symbols)
+    if (this.onBeforeShow) {
+      await this.onBeforeShow();
+    }
+
     this.parent.addChild(this.overlay);
 
     try {

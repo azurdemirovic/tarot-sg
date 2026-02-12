@@ -134,7 +134,8 @@ export class TarotFeatureProcessor {
    */
   applyFool(grid: Grid, trigger: FeatureTrigger): FoolResult {
     const rows = grid[0].length; // 3
-    const premiumPool = this.assetLoader.getSymbolsByTier('PREMIUM');
+    const premiumPool = this.assetLoader.getSymbolsByTier('PREMIUM')
+      .filter(s => !TarotFeatureProcessor.ANCHOR_SYMBOLS.has(s.id));
 
     // 1. Roll wild count per column
     const perColWilds: number[] = [];

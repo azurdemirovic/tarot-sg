@@ -78,7 +78,8 @@ export class ReelSpinner extends Container {
     const fillerSymbols: string[] = [];
     
     const normalSymbols = this.assetLoader.getNormalSymbols();
-    const premiumSymbols = this.assetLoader.getSymbolsByTier('PREMIUM');
+    const premiumSymbols = this.assetLoader.getSymbolsByTier('PREMIUM')
+      .filter(s => s.id !== 'MALE' && s.id !== 'FEMALE');
     
     for (let i = 0; i < fillerCount; i++) {
       if (Math.random() < 0.3) {

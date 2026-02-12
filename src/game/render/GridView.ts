@@ -22,6 +22,7 @@ export class GridView extends Container {
     private rows: number = 3
   ) {
     super();
+    this.sortableChildren = true; // Enable zIndex-based sorting
     this.initializeGrid();
     this.loadBackground();
     this.loadFrame();
@@ -47,7 +48,8 @@ export class GridView extends Container {
       const extraH = (totalHeight + borderY * 2) * (scale - 1) / 2;
       this.frameSprite.position.set(-borderX - extraW, -borderY - extraH);
       
-      // Add frame on top of everything
+      // Add frame on top of everything — high zIndex so overlays stay behind
+      this.frameSprite.zIndex = 100;
       this.addChild(this.frameSprite);
       console.log('✅ Frame loaded');
     } catch (error) {
@@ -429,6 +431,37 @@ export class GridView extends Container {
   getPadding(): number { return this.padding; }
   getCols(): number { return this.cols; }
   getRows(): number { return this.rows; }
+
+  /**
+   * Get the grid's center position in screen (CSS pixel) coordinates.
+   * The pixi logical resolution is 1040×720 (from app.init). We map from
+   * pixi world coords to screen CSS coords via the canvas bounding rect.
+   */
+  getGridScreenCenter(canvas: HTMLCanvasElement): { x: number; y: number } {
+    const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
+    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
+    // Grid center in pixi world coords
+    const worldPos = this.getGlobalPosition();
+    const gridCenterX = worldPos.x + totalWidth / 2;
+    const gridCenterY = worldPos.y + totalHeight / 2;
+
+    // Pixi logical resolution (the values passed to app.init)
+    const logicalW = 1040;
+    const logicalH = 720;
+
+    // Canvas CSS rect on screen
+    const canvasRect = canvas.getBoundingClientRect();
+
+    // Map pixi logical coords to CSS screen coords
+    const scaleX = canvasRect.width / logicalW;
+    const scaleY = canvasRect.height / logicalH;
+
+    return {
+      x: canvasRect.left + gridCenterX * scaleX,
+      y: canvasRect.top + gridCenterY * scaleY,
+    };
+  }
   /** Get the centering offset of the reel container (0,0 at base size) */
   getReelContainerOffset(): { x: number; y: number } {
     return {

@@ -34,6 +34,7 @@ export class TarotTitleDisplay {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private animationFrameId: number = 0;
+  private gridCenter: { x: number; y: number } | null = null;
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -46,13 +47,18 @@ export class TarotTitleDisplay {
    * @param fadeInMs - fade in duration
    * @param holdMs - hold duration
    * @param fadeOutMs - fade out duration
+   * @param center - optional screen-space center point to position the title on (e.g. grid center)
    */
   async show(
     tarotType: string,
     fadeInMs: number = 400,
     holdMs: number = 1000,
-    fadeOutMs: number = 400
+    fadeOutMs: number = 400,
+    center?: { x: number; y: number }
   ): Promise<void> {
+    if (center) {
+      this.gridCenter = center;
+    }
     const name = TAROT_DISPLAY_NAMES[tarotType] || tarotType.replace('T_', '');
     const color = TAROT_COLORS[tarotType] || '#ffffff';
     const glowColor = TAROT_GLOW_COLORS[tarotType] || 'rgba(255,255,255,0.6)';
@@ -119,20 +125,32 @@ export class TarotTitleDisplay {
     // Clear
     ctx.clearRect(0, 0, w, h);
 
-    // Semi-transparent dark background for readability
-    ctx.fillStyle = `rgba(0, 0, 0, ${0.5 * opacity})`;
+    // Full-screen dimmed backdrop overlay
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.7 * opacity})`;
     ctx.fillRect(0, 0, w, h);
 
     ctx.globalAlpha = opacity;
 
-    const centerX = w / 2;
-    const centerY = h / 2 - 20;
+    // Center on the grid if available, otherwise fall back to screen center
+    let centerX: number;
+    let centerY: number;
+    if (this.gridCenter) {
+      centerX = this.gridCenter.x;
+      centerY = this.gridCenter.y;
+    } else {
+      centerX = w / 2;
+      centerY = h / 2;
+    }
+
+    // Offset upward so the visual center of title + subtitle block is at centerY
+    const blockOffset = 25;
+    const titleY = centerY - blockOffset;
 
     // Draw curved tarot name
-    this.drawCurvedText(ctx, name, centerX, centerY, color, glowColor);
+    this.drawCurvedText(ctx, name, centerX, titleY, color, glowColor);
 
     // Draw subtitle "FEATURE TRIGGERED"
-    const subtitleY = centerY + 50;
+    const subtitleY = titleY + 50;
     const subtitleSize = Math.max(16, Math.min(22, w * 0.022));
     ctx.font = `bold ${subtitleSize}px 'CustomFont', Arial, sans-serif`;
     ctx.textAlign = 'center';
@@ -170,41 +188,54 @@ export class TarotTitleDisplay {
     const radius = fontSize * 8; // Large radius = gentle curve
     const arcCenterY = centerY + radius; // Arc center below text
 
-    // Calculate total angular span based on text width
-    const totalWidth = ctx.measureText(text).width;
-    const totalAngle = totalWidth / radius; // Radians spanned by text
-
-    // Starting angle (top of arc, centered)
-    const startAngle = -Math.PI / 2 - totalAngle / 2;
-
     // Measure individual character widths
     const chars = text.split('');
     const charWidths = chars.map(c => ctx.measureText(c).width);
     const letterSpacing = fontSize * 0.12; // Extra spacing between chars
+
+    // Calculate the true total angular span including letter spacing
+    let totalArcLength = 0;
+    for (let i = 0; i < chars.length; i++) {
+      totalArcLength += charWidths[i];
+      if (i < chars.length - 1) totalArcLength += letterSpacing;
+    }
+    const totalAngle = totalArcLength / radius;
+
+    // Starting angle — centered at the top of the arc (-PI/2)
+    const startAngle = -Math.PI / 2 - totalAngle / 2;
+
+    // Helper to draw characters along the arc
+    const drawCharsOnArc = () => {
+      let angle = startAngle;
+      for (let i = 0; i < chars.length; i++) {
+        // Advance by half the char width to reach the char center
+        const halfCharAngle = charWidths[i] / 2 / radius;
+        angle += halfCharAngle;
+
+        const x = centerX + radius * Math.cos(angle);
+        const y = arcCenterY + radius * Math.sin(angle);
+        const rotation = angle + Math.PI / 2;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+        ctx.fillText(chars[i], 0, 0);
+        ctx.restore();
+
+        // Advance past the second half of this char + spacing to next
+        angle += halfCharAngle;
+        if (i < chars.length - 1) {
+          angle += letterSpacing / radius;
+        }
+      }
+    };
 
     // Draw with glow first
     ctx.save();
     ctx.shadowColor = glowColor;
     ctx.shadowBlur = 25;
     ctx.fillStyle = color;
-
-    let currentAngle = startAngle;
-    for (let i = 0; i < chars.length; i++) {
-      const halfCharAngle = (charWidths[i] / 2 + (i > 0 ? letterSpacing / 2 : 0)) / radius;
-      currentAngle += halfCharAngle;
-
-      const x = centerX + radius * Math.cos(currentAngle);
-      const y = arcCenterY + radius * Math.sin(currentAngle);
-      const rotation = currentAngle + Math.PI / 2;
-
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(rotation);
-      ctx.fillText(chars[i], 0, 0);
-      ctx.restore();
-
-      currentAngle += (charWidths[i] / 2 + letterSpacing / 2) / radius;
-    }
+    drawCharsOnArc();
     ctx.restore();
 
     // Second pass — crisp text without glow
@@ -212,24 +243,7 @@ export class TarotTitleDisplay {
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
     ctx.fillStyle = color;
-
-    currentAngle = startAngle;
-    for (let i = 0; i < chars.length; i++) {
-      const halfCharAngle = (charWidths[i] / 2 + (i > 0 ? letterSpacing / 2 : 0)) / radius;
-      currentAngle += halfCharAngle;
-
-      const x = centerX + radius * Math.cos(currentAngle);
-      const y = arcCenterY + radius * Math.sin(currentAngle);
-      const rotation = currentAngle + Math.PI / 2;
-
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(rotation);
-      ctx.fillText(chars[i], 0, 0);
-      ctx.restore();
-
-      currentAngle += (charWidths[i] / 2 + letterSpacing / 2) / radius;
-    }
+    drawCharsOnArc();
     ctx.restore();
   }
 

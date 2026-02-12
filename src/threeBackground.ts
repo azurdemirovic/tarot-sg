@@ -48,6 +48,8 @@ export class ThreeBackground {
   // Model swap support
   private mainModel: THREE.Object3D | null = null;
   private mainMixer: THREE.AnimationMixer | null = null;
+  private mainBaseY: number = 0.0; // Base Y position for float animation
+  private mainAnimTime: number = 0;
 
   // Fool model (for Fool feature)
   private foolModel: THREE.Object3D | null = null;
@@ -89,6 +91,17 @@ export class ThreeBackground {
 
   // Death glow effect (organic noisy sprite)
   private deathGlow: THREE.Sprite | null = null;
+
+  // Lovers model (appears during Lovers feature only)
+  private loversModel: THREE.Object3D | null = null;
+  private loversMixer: THREE.AnimationMixer | null = null;
+  private isLoversSwapped: boolean = false;
+  private loversReady: boolean = false;
+  private loversBaseY: number = 0; // Set after loading
+  private loversAnimTime: number = 0;
+
+  // Lovers glow effect (organic noisy sprite)
+  private loversGlow: THREE.Sprite | null = null;
 
   
   constructor(options: ThreeBgOptions) {
@@ -178,8 +191,11 @@ export class ThreeBackground {
     // ── Load queen of swords model (appears during Priestess feature) ──
     this.loadQueenModel('/assets/3d/the_queen_of_swords.glb');
 
-    // ── Load death model (always visible, with debug sliders) ──
+    // ── Load death model (appears during Death feature) ──
     this.loadDeathModel('/assets/3d/death.glb');
+
+    // ── Load lovers model (appears during Lovers feature) ──
+    this.loadLoversModel('/assets/3d/lovers.glb');
 
     // ── Resize handling ──
     window.addEventListener('resize', () => this.onResize());
@@ -195,14 +211,9 @@ export class ThreeBackground {
       (gltf) => {
         const model = gltf.scene;
 
-        // Auto-scale only (no centering or shifting — position set via bgGroup)
+        // Compute bounding box for logging
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
-
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const targetSize = 164;
-        const scale = targetSize / maxDim;
-        model.scale.setScalar(scale);
 
         // Performance: frustum culling + desaturate to black & white
         model.traverse((child) => {
@@ -302,7 +313,10 @@ export class ThreeBackground {
         this.mainModel = model;
 
         // Position the main model (not bgGroup, so swap models keep their own positions)
-        model.position.set(11.5, 0.5, 12.0);
+        model.position.set(11.5, 0.0, 12.0);
+        this.mainBaseY = 0.0; // Store base Y for float animation
+        model.rotation.set(0.02, -0.07, 0.06);
+        model.scale.setScalar(10.0);
 
         // Detach FOND mesh from the main model so it stays visible during model swaps.
         // We need to update the matrix first so world transform is computed, then reparent.
@@ -362,6 +376,12 @@ export class ThreeBackground {
     if (this.mainMixer) {
       this.mainMixer.update(delta * 3);
     }
+    // Main model (ancient woman) float up/down animation — always active
+    if (this.mainModel) {
+      this.mainAnimTime += delta;
+      const floatOffset = Math.sin(this.mainAnimTime * 0.8) * 0.3;
+      this.mainModel.position.y = this.mainBaseY + floatOffset;
+    }
     // Fool model mixer — tick whenever visible
     if (this.foolMixer && this.foolModel?.visible) {
       this.foolMixer.update(delta * 1.0);
@@ -395,6 +415,27 @@ export class ThreeBackground {
     // Death model mixer — tick only during Death feature (slow, dramatic pace)
     if (this.deathMixer && this.isDeathSwapped) {
       this.deathMixer.update(delta * 0.15);
+    }
+    // Lovers flipbook frame cycling + float + slow Y rotation
+    if (this.loversModel?.visible) {
+      this.loversAnimTime += delta;
+      const floatOffset = Math.sin(this.loversAnimTime * 0.8) * 0.3;
+      this.loversModel.position.y = this.loversBaseY + floatOffset;
+      this.loversModel.rotation.y += delta * 0.15; // Slow constant Y rotation
+
+      // Cycle flipbook frames
+      const frames = (this.loversModel as any)._loversFrames as THREE.Object3D[] | undefined;
+      if (frames && frames.length > 1) {
+        const m = this.loversModel as any;
+        m._loversFrameTimer += delta;
+        const frameDuration = 0.25; // seconds per frame
+        if (m._loversFrameTimer >= frameDuration) {
+          m._loversFrameTimer -= frameDuration;
+          frames[m._loversFrameIndex].visible = false;
+          m._loversFrameIndex = (m._loversFrameIndex + 1) % frames.length;
+          frames[m._loversFrameIndex].visible = true;
+        }
+      }
     }
 
     // Rotate FOND mesh around Z axis
@@ -1012,6 +1053,111 @@ export class ThreeBackground {
       undefined,
       (error) => {
         console.error('❌ Failed to load Death model:', error);
+      }
+    );
+  }
+
+  /**
+   * Load the lovers.glb model for the Lovers feature.
+   * Includes debug slider panel for positioning.
+   */
+  private loadLoversModel(path: string): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // Log all meshes
+        model.traverse((child: THREE.Object3D) => {
+          if ((child as THREE.Mesh).isMesh) {
+            console.log(`📦 Lovers mesh: "${child.name}"`);
+          }
+        });
+
+        // Apply the engraved shader with alpha preservation
+        this.applyEngravedShaderPreserveAlpha(model);
+
+        // Darken materials slightly to match scene style
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              const stdMat = mat as THREE.MeshStandardMaterial;
+              if (stdMat.color) {
+                stdMat.color.multiplyScalar(0.55);
+                stdMat.needsUpdate = true;
+              }
+            }
+          }
+        });
+
+        // Hardcoded transform — hidden by default, shown during Lovers feature
+        model.position.set(-15.5, -3.0, 5.0);
+        model.rotation.set(0.10, 12.38, 0.00);
+        model.scale.setScalar(3.6);
+        model.visible = false;
+
+        this.loversBaseY = model.position.y;
+
+        // Create organic glow sprite for entrance/exit effect
+        const loversGlowTexture = this.generateGlowTexture();
+        const loversGlowMat = new THREE.SpriteMaterial({
+          map: loversGlowTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const loversGlowSprite = new THREE.Sprite(loversGlowMat);
+        loversGlowSprite.position.copy(model.position);
+        loversGlowSprite.position.y += 3;
+        loversGlowSprite.scale.setScalar(0.1);
+        loversGlowSprite.visible = false;
+        this.bgGroup.add(loversGlowSprite);
+        this.loversGlow = loversGlowSprite;
+
+        this.bgGroup.add(model);
+        this.loversModel = model;
+
+        // The GLB contains 7 frame groups (frame_0 through frame_6) — same
+        // sculpture at different stop-motion stages. We cycle through them
+        // manually as a flipbook in the render loop.
+        // Force all frame containers to scale 1, but hide all except the first.
+        const loversFrames: THREE.Object3D[] = [];
+        const frameNodeNames = ['Object_50', 'Object_42', 'Object_34', 'Object_26', 'Object_18', 'Object_10', 'Object_2'];
+        model.traverse((child: THREE.Object3D) => {
+          if (frameNodeNames.includes(child.name)) {
+            child.scale.setScalar(1);
+            child.visible = false;
+            loversFrames.push(child);
+          }
+        });
+        // Sort to match frame order (Object_50=frame_0, Object_42=frame_1, etc.)
+        loversFrames.sort((a, b) => frameNodeNames.indexOf(a.name) - frameNodeNames.indexOf(b.name));
+        if (loversFrames.length > 0) {
+          loversFrames[0].visible = true;
+        }
+        // Store frames for render loop cycling
+        (model as any)._loversFrames = loversFrames;
+        (model as any)._loversFrameIndex = 0;
+        (model as any)._loversFrameTimer = 0;
+        console.log(`🎬 Lovers: ${loversFrames.length} flipbook frames set up for manual cycling`);
+
+        // Pre-compile to avoid first-frame glitches
+        model.visible = true;
+        this.renderer.compile(this.scene, this.camera);
+        this.renderer.render(this.scene, this.camera);
+        model.visible = false;
+        this.loversReady = true;
+
+        console.log(`✅ Lovers model loaded & pre-compiled: ${path}`);
+      },
+      undefined,
+      (error) => {
+        console.error('❌ Failed to load Lovers model:', error);
       }
     );
   }
@@ -1709,6 +1855,142 @@ export class ThreeBackground {
           model.visible = false;
           this.isDeathSwapped = false;
           console.log('💀 Death dissolved into glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Bring in the lovers model for the Lovers feature — glow entrance.
+   */
+  swapToLovers(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.isLoversSwapped && this.loversModel) {
+        resolve();
+        return;
+      }
+
+      if (!this.loversReady || !this.loversModel) {
+        console.warn('⏳ Lovers model not ready yet, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.loversReady && this.loversModel) {
+            clearInterval(checkInterval);
+            this.animateLoversEntrance().then(resolve);
+          }
+        }, 100);
+        return;
+      }
+
+      this.animateLoversEntrance().then(resolve);
+    });
+  }
+
+  /**
+   * Animate lovers entrance: glow builds up, model appears behind glow,
+   * then glow fades to reveal the model.
+   */
+  private animateLoversEntrance(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.loversModel || !this.loversGlow) { resolve(); return; }
+
+      const model = this.loversModel;
+      const glow = this.loversGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+      model.visible = false;
+      this.isLoversSwapped = true;
+
+      const duration = 1800;
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.35) {
+          const p = t / 0.35;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (!model.visible) {
+            model.visible = true;
+          }
+          const p = (t - 0.35) / 0.65;
+          const eased = p * p * p;
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.6));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = true;
+          console.log('💕 Lovers materialized from glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Animate lovers exit: glow covers model, model hides, glow fades.
+   */
+  restoreLovers(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isLoversSwapped || !this.loversModel || !this.loversGlow) {
+        resolve();
+        return;
+      }
+
+      const model = this.loversModel;
+      const glow = this.loversGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(1);
+      glowMat.opacity = 0;
+
+      const duration = 900;
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.4) {
+          const p = t / 0.4;
+          const eased = p * p;
+          glow.scale.setScalar(1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (model.visible) {
+            model.visible = false;
+          }
+          const p = (t - 0.4) / 0.6;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.85));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = false;
+          this.isLoversSwapped = false;
+          console.log('💕 Lovers dissolved into glow');
           resolve();
         }
       };

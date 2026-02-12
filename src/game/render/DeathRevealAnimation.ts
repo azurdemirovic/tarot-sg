@@ -213,21 +213,7 @@ export class DeathRevealAnimation {
         await wait(300);
       }
 
-      // ── Phase C: Show total payout ──
-      if (totalPayout > 0) {
-        const winDisplay = new WinDisplay(this.parent);
-        const syntheticWins = [{ payout: totalPayout }];
-        await winDisplay.show(
-          syntheticWins,
-          1,
-          totalPayout,
-          betAmount,
-          totalWidth,
-          totalHeight,
-          10,
-          2000
-        );
-      }
+      // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
       // Cleanup
       this.cleanupOverlay();

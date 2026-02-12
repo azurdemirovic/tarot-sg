@@ -13,7 +13,7 @@ export const DEBUG = {
   BG_ANIMATE_CAMERA: true,
 
   /** Force Cups feature on next spin (for testing) */
-  FORCE_CUPS: true,
+  FORCE_CUPS: false,
 
   /** Columns to place Cups cards (2 or 3 columns) */
   CUPS_COLUMNS: [1, 3],
@@ -31,8 +31,11 @@ export const DEBUG = {
   PRIESTESS_COLUMNS: [1, 3],
 
   /** Force Death feature on next spin (for testing) */
-  FORCE_DEATH: false,
+  FORCE_DEATH: true,
 
   /** Columns to place Death cards (2 or 3 columns) */
   DEATH_COLUMNS: [1, 3],
+
+  /** Show payline connection lines (debug visualization) */
+  SHOW_PAYLINES: false,
 };

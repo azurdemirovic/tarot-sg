@@ -264,7 +264,8 @@ async function handleSpin() {
     // ── Phase 1.75: Show tarot title card if a feature triggered ──
     if (spinOutput.feature) {
       const titleDisplay = new TarotTitleDisplay();
-      await titleDisplay.show(spinOutput.feature.type, 400, 1000, 400);
+      const gridCenter = gridView.getGridScreenCenter(app.canvas as HTMLCanvasElement);
+      await titleDisplay.show(spinOutput.feature.type, 400, 1000, 400, gridCenter);
     }
 
     // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
@@ -406,6 +407,7 @@ async function handleSpin() {
       spinBtn.disabled = true;
       loversFeatureActive = true;
       threeBg?.setFeatureColor('T_LOVERS');
+      await threeBg?.swapToLovers();
 
       const loversReveal = new LoversRevealAnimation(
         gridView,
@@ -449,6 +451,7 @@ async function handleSpin() {
       );
       loversFeatureActive = false;
       threeBg?.clearFeatureColor();
+      await threeBg?.restoreLovers();
 
       // Restore all reel columns to visible after Lovers
       for (let col = 0; col < gridView.getCols(); col++) {
@@ -513,6 +516,30 @@ async function handleSpin() {
       currentSpinData.totalWin = deathPayout;
     }
 
+    // ── Phase 2.9: Highlight winning symbols, then show win display ──
+    if (currentSpinData && currentSpinData.wins.length > 0) {
+      // First: radiate outlines on winning symbols
+      paylineOverlay.showWinningPaylines(currentSpinData.wins, gridView.getReelSpinners());
+      await delay(1000); // Let the radiating outline animation play fully
+
+      // Clear outlines before showing win display (so they don't overlap the dim screen)
+      paylineOverlay.clear();
+
+      // Then: show big win display with headline (FATE BREAKER, etc.)
+      const totalWidth = gridView.getCols() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
+      const totalHeight = gridView.getRows() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
+      const { WinDisplay } = await import('./game/render/WinDisplay');
+      const winDisplay = new WinDisplay(gridView);
+      await winDisplay.show(
+        currentSpinData.wins,
+        currentSpinData.multiplier,
+        currentSpinData.totalWin,
+        gameController.betAmount,
+        totalWidth,
+        totalHeight
+      );
+    }
+
     // ── Phase 3: Show results ──
     await showResults();
   } catch (error) {
@@ -529,11 +556,7 @@ async function handleSpin() {
 async function showResults() {
   if (!currentSpinData) return;
 
-  if (currentSpinData.wins.length > 0) {
-    setTimeout(() => {
-      paylineOverlay.showWinningPaylines(currentSpinData!.wins);
-    }, 200);
-  }
+  // Payline highlighting is already shown in Phase 2.9 before payout
   
   updateUI();
   

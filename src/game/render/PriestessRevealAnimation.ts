@@ -180,21 +180,7 @@ export class PriestessRevealAnimation {
         await wait(300);
       }
 
-      // ── Phase C: Show total payout via WinDisplay (only if > 10× bet) ──
-      if (totalPayout > 0) {
-        const winDisplay = new WinDisplay(this.parent);
-        const syntheticWins = [{ payout: totalPayout }];
-        await winDisplay.show(
-          syntheticWins,
-          1, // multiplier already factored into totalPayout
-          totalPayout,
-          betAmount,
-          totalWidth,
-          totalHeight,
-          10, // standard 10× bet threshold
-          2000
-        );
-      }
+      // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
       // Final cleanup — restore all reel sprite visibility
       for (let col = 0; col < this.cols; col++) {
@@ -297,21 +283,23 @@ export class PriestessRevealAnimation {
   // ── Create mystery cover content (MYSTERY.png sprite — fully covers the cell) ──
   private addMysteryCoverContent(container: Container): void {
     const coverSize = this.cellSize;
+
+    // Lighter background behind the mystery symbol — visible through sprite alpha
+    const bg = new Graphics();
+    bg.roundRect(-coverSize / 2, -coverSize / 2, coverSize, coverSize, 8);
+    bg.fill({ color: 0x9080b0 });
+    container.addChild(bg);
+
     const mysteryTexture = this.assetLoader.getTexture('MYSTERY');
     if (mysteryTexture) {
       const sprite = new Sprite(mysteryTexture);
       sprite.anchor.set(0.5);
       sprite.width = coverSize;
       sprite.height = coverSize;
+      sprite.alpha = 0.7; // Let lighter background bleed through
       container.addChild(sprite);
     } else {
       // Fallback if texture not loaded
-      const bg = new Graphics();
-      bg.roundRect(-coverSize / 2, -coverSize / 2, coverSize, coverSize, 8);
-      bg.fill({ color: 0x2a1050 });
-      bg.stroke({ width: 2, color: 0x9a4de6 });
-      container.addChild(bg);
-
       const style = new TextStyle({
         fontFamily: 'CustomFont, Arial, sans-serif',
         fontSize: Math.max(11, this.cellSize * 0.11),
@@ -324,6 +312,12 @@ export class PriestessRevealAnimation {
       text.anchor.set(0.5);
       container.addChild(text);
     }
+
+    // Dark bleed / black outline on the edges of the symbol
+    const outline = new Graphics();
+    outline.rect(-coverSize / 2, -coverSize / 2, coverSize, coverSize);
+    outline.stroke({ width: 4, color: 0x000000, alpha: 0.85 });
+    container.addChild(outline);
   }
 
   // ── Create a single mystery overlay ──

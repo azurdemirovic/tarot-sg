@@ -419,7 +419,7 @@ export class TarotTearEffect {
 
     // Phase 1: Tear propagates top-to-bottom (tearAmount ramps from 0 → ~1.8)
     const tearDuration = 1000; // ms — slower for natural feel
-    const fallDuration = 700;  // ms
+    const fallDuration = 1800;  // ms — long enough for halves to fall off screen
 
     await this.tweenTear(tearDuration);
 
@@ -485,20 +485,20 @@ export class TarotTearEffect {
       const leftStartRotZ = leftMesh.rotation.z;
       const rightStartRotZ = rightMesh.rotation.z;
 
-      // Random fall parameters
-      const leftFallDist = -(2 + Math.random() * 2);
-      const rightFallDist = -(2 + Math.random() * 2);
-      const leftDriftX = -(1 + Math.random() * 1.5);
-      const rightDriftX = (1 + Math.random() * 1.5);
-      const leftRotZ = -(0.5 + Math.random() * 1.0);
-      const rightRotZ = (0.5 + Math.random() * 1.0);
+      // Random fall parameters — larger distances so pieces fall off screen
+      const leftFallDist = -(6 + Math.random() * 4);
+      const rightFallDist = -(6 + Math.random() * 4);
+      const leftDriftX = -(1.5 + Math.random() * 2.0);
+      const rightDriftX = (1.5 + Math.random() * 2.0);
+      const leftRotZ = -(0.8 + Math.random() * 1.5);
+      const rightRotZ = (0.8 + Math.random() * 1.5);
 
       const animate = (now: number) => {
         if (this.disposed) { resolve(); return; }
 
         const elapsed = now - start;
         const t = Math.min(elapsed / duration, 1);
-        // Ease in quad (accelerate as they fall)
+        // Ease in quad (accelerate as they fall — gravity feel)
         const eased = t * t;
 
         leftMesh.position.y = leftStartY + leftFallDist * eased;
@@ -509,8 +509,9 @@ export class TarotTearEffect {
         rightMesh.position.x = rightStartX + rightDriftX * eased;
         rightMesh.rotation.z = rightStartRotZ + rightRotZ * eased;
 
-        // Fade out
-        const alpha = 1 - eased;
+        // Delayed fade — stay visible for the first 40%, then fade out over the remaining 60%
+        const fadeT = Math.max(0, (t - 0.4) / 0.6);
+        const alpha = 1 - fadeT * fadeT;
         (leftMesh.material as THREE.ShaderMaterial).opacity = alpha;
         (rightMesh.material as THREE.ShaderMaterial).opacity = alpha;
 
