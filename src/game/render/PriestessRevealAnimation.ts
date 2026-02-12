@@ -123,9 +123,11 @@ export class PriestessRevealAnimation {
 
     try {
       // ── Phase A: Tear away Priestess tarot columns ──
-      await this.phaseTearTarots(feature);
+      // Start tear (don't await — reels start scrolling immediately alongside the tear)
+      const tearPromise = this.phaseTearTarots(feature);
 
       // ── Phase B: Multi-spin loop (auto-spins, no button clicks) ──
+      let isFirstSpin = true;
       while (priestessResult.spinsRemaining > 0) {
         const spinNum = priestessResult.spinsTotal - priestessResult.spinsRemaining + 1;
         console.log(`🔮 Priestess Spin ${spinNum}/${priestessResult.spinsTotal}`);
@@ -143,7 +145,13 @@ export class PriestessRevealAnimation {
         );
 
         // B2: Spin the grid — mystery cells stay hidden throughout (overlay covers them)
-        await this.phaseSpinFreshGrid(freshGrid, spinResult.mysteryCells);
+        // On first spin, run concurrently with the tear; otherwise just spin
+        if (isFirstSpin) {
+          await Promise.all([tearPromise, this.phaseSpinFreshGrid(freshGrid, spinResult.mysteryCells)]);
+          isFirstSpin = false;
+        } else {
+          await this.phaseSpinFreshGrid(freshGrid, spinResult.mysteryCells);
+        }
 
         // B4: Animate only NEW mystery covers popping in (persistent ones already have overlays)
         await this.phaseShowNewMysteryCovers(spinResult.newMysteryCells);

@@ -418,8 +418,8 @@ export class TarotTearEffect {
     }
 
     // Phase 1: Tear propagates top-to-bottom (tearAmount ramps from 0 → ~1.8)
-    const tearDuration = 1000; // ms — slower for natural feel
-    const fallDuration = 1800;  // ms — long enough for halves to fall off screen
+    const tearDuration = 800; // ms
+    const fallDuration = 600;  // ms — fast fall off screen
 
     await this.tweenTear(tearDuration);
 
@@ -509,8 +509,8 @@ export class TarotTearEffect {
         rightMesh.position.x = rightStartX + rightDriftX * eased;
         rightMesh.rotation.z = rightStartRotZ + rightRotZ * eased;
 
-        // Delayed fade — stay visible for the first 40%, then fade out over the remaining 60%
-        const fadeT = Math.max(0, (t - 0.4) / 0.6);
+        // Fade — stay visible for the first 20%, then fade out over the remaining 80%
+        const fadeT = Math.max(0, (t - 0.2) / 0.8);
         const alpha = 1 - fadeT * fadeT;
         (leftMesh.material as THREE.ShaderMaterial).opacity = alpha;
         (rightMesh.material as THREE.ShaderMaterial).opacity = alpha;

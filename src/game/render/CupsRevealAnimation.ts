@@ -113,11 +113,12 @@ export class CupsRevealAnimation {
     this.parent.addChild(this.multiplierLayer);
 
     try {
-      // Phase 1 — Hide Cups columns
-      await this.phaseHideCups(feature);
+      // Phase 1 — Hide Cups columns (tear starts immediately)
+      // Start tear (don't await — next phase starts scrolling alongside the tear)
+      const tearPromise = this.phaseHideCups(feature);
 
-      // Phase 2 — Reveal initial multipliers
-      await this.phaseRevealInitialMultipliers(cupsResult);
+      // Phase 2 — Reveal initial multipliers (runs concurrently with tear)
+      await Promise.all([tearPromise, this.phaseRevealInitialMultipliers(cupsResult)]);
 
       // Phase 3 — Board clear (hide all symbols except multipliers)
       await this.phaseBoardClear(cupsResult);

@@ -102,12 +102,12 @@ export class LoversRevealAnimation {
     this.overlay.addChild(this.cardContainer);
 
     try {
-      // Phase A — Hide Lovers tarot columns
-      await this.phaseHideLovers(feature);
-      await wait(300);
+      // Phase A — Hide Lovers tarot columns (tear starts immediately)
+      // Start tear (don't await — premium reveal starts alongside the tear)
+      const tearPromise = this.phaseHideLovers(feature);
 
-      // Phase B — Show freed Lovers columns with premium symbols
-      await this.phaseRevealPremiums(feature, loversResult);
+      // Phase B — Show freed Lovers columns with premium symbols (runs concurrently with tear)
+      await Promise.all([tearPromise, this.phaseRevealPremiums(feature, loversResult)]);
       await wait(400);
 
       // Phase C — Multi-spin loop
@@ -209,20 +209,6 @@ export class LoversRevealAnimation {
     }
   }
 
-  // ── Rarity → color mapping for card fronts ──────────────
-  private static readonly RARITY_COLORS: Record<string, number> = {
-    LOW:     0x8899AA,  // Silver-grey
-    PREMIUM: 0xD4A017,  // Gold
-    WILD:    0x9B30FF,  // Purple
-    TAROT:   0x2E0854,  // Deep violet
-  };
-
-  private getRarityColor(symbolId: string): number {
-    const symbol = this.assetLoader.getSymbol(symbolId);
-    if (!symbol) return 0x333333;
-    return LoversRevealAnimation.RARITY_COLORS[symbol.tier] ?? 0x333333;
-  }
-
   // ── Phase C1: Card Pick ─────────────────────────────────
   // Shows 3 card backs, player clicks one, it flips to reveal the bond symbol.
   private async phaseCardPick(
@@ -251,11 +237,9 @@ export class LoversRevealAnimation {
     title.y = totalHeight / 2 - 130;
     this.cardContainer.addChild(title);
 
-    // Card layout — wider cards
+    // Card layout
     const cardWidth = 130;
     const cardHeight = 170;
-    const cardPad = 8;       // Black inner padding
-    const outlineWidth = 3;
     const gap = 24;
     const totalCardsWidth = 3 * cardWidth + 2 * gap;
     const startX = totalWidth / 2 - totalCardsWidth / 2 + cardWidth / 2;
@@ -332,59 +316,25 @@ export class LoversRevealAnimation {
         selectedCard.scale.x = 1.06 * (1 - t);
       });
 
-      // Replace back content with the front
+      // Replace back content with the front — plain white card with symbol
       selectedCard.removeChildren();
 
-      // Rarity-based fill color
-      const rarityColor = this.getRarityColor(candidates[selectedIndex]);
+      // Plain white background
+      const bg = new Graphics();
+      bg.roundRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 10);
+      bg.fill({ color: 0xFFFFFF, alpha: 1 });
+      selectedCard.addChild(bg);
 
-      // Outer rarity-colored fill
-      const outerBg = new Graphics();
-      outerBg.roundRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 10);
-      outerBg.fill({ color: rarityColor, alpha: 1 });
-      selectedCard.addChild(outerBg);
-
-      // Black padded inner area
-      const innerX = -cardWidth / 2 + outlineWidth + cardPad;
-      const innerY = -cardHeight / 2 + outlineWidth + cardPad;
-      const innerW = cardWidth - 2 * (outlineWidth + cardPad);
-      const innerH = cardHeight - 2 * (outlineWidth + cardPad);
-      const innerBg = new Graphics();
-      innerBg.roundRect(innerX, innerY, innerW, innerH, 6);
-      innerBg.fill({ color: 0x0A0A0A, alpha: 0.95 });
-      selectedCard.addChild(innerBg);
-
-      // Rarity outline border on top
-      const border = new Graphics();
-      border.roundRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 10);
-      border.stroke({ color: rarityColor, width: outlineWidth });
-      selectedCard.addChild(border);
-
-      // Revealed symbol centered on the black area
+      // Symbol centered on the white card
       const symbolTexture = this.assetLoader.getTexture(candidates[selectedIndex]);
       if (symbolTexture) {
-        const symbolSize = Math.min(innerW, innerH) - 16;
+        const symbolSize = Math.min(cardWidth, cardHeight) - 30;
         const symbol = new Sprite(symbolTexture);
         symbol.anchor.set(0.5);
         symbol.width = symbolSize;
         symbol.height = symbolSize;
-        symbol.y = -10;
         selectedCard.addChild(symbol);
       }
-
-      // Symbol name label at bottom
-      const label = new Text({
-        text: candidates[selectedIndex],
-        style: new TextStyle({
-          fontFamily: 'CustomFont, Arial, sans-serif',
-          fontSize: 14,
-          fill: rarityColor,
-          stroke: { color: 0x000000, width: 2 },
-        }),
-      });
-      label.anchor.set(0.5);
-      label.y = cardHeight / 2 - 22;
-      selectedCard.addChild(label);
 
       // Phase 2: Expand horizontally (card front appearing)
       await tween(200, (t) => {
@@ -567,40 +517,69 @@ export class LoversRevealAnimation {
     await Promise.all(allDone);
   }
 
-  // ── Glow effects ───────────────────────────────────────
-  private spawnAnchorGlow(col: number, row: number, step: number, color: number): void {
-    const cx = col * step + this.cellSize / 2;
-    const cy = row * step + this.cellSize / 2;
-
-    const glow = new Graphics();
-    glow.x = cx;
-    glow.y = cy;
-    this.glowContainer.addChild(glow);
-
-    tween(600, (t) => {
-      glow.clear();
-      const radius = this.cellSize * 0.4 * (0.6 + t * 0.4);
-      const alpha = t < 0.3 ? (t / 0.3) * 0.6 : 0.6 * (1 - (t - 0.3) / 0.7) + 0.05;
-      glow.circle(0, 0, radius);
-      glow.fill({ color, alpha });
-    }, easeOutCubic);
+  // ── Glow effects (dark, diffuse particle-like burst) ────
+  private spawnAnchorGlow(col: number, row: number, step: number, _color: number): void {
+    this.spawnDarkParticleGlow(col, row, step, 700);
   }
 
   private spawnBondGlow(col: number, row: number, step: number): void {
+    this.spawnDarkParticleGlow(col, row, step, 700);
+  }
+
+  private spawnDarkParticleGlow(col: number, row: number, step: number, duration: number): void {
     const cx = col * step + this.cellSize / 2;
     const cy = row * step + this.cellSize / 2;
 
-    const glow = new Graphics();
-    glow.x = cx;
-    glow.y = cy;
-    this.glowContainer.addChild(glow);
+    const glowGroup = new Container();
+    glowGroup.x = cx;
+    glowGroup.y = cy;
+    this.glowContainer.addChild(glowGroup);
 
-    tween(500, (t) => {
-      glow.clear();
-      const radius = this.cellSize * 0.35 * (0.6 + t * 0.4);
-      const alpha = t < 0.3 ? (t / 0.3) * 0.5 : 0.5 * (1 - (t - 0.3) / 0.7) + 0.05;
-      glow.circle(0, 0, radius);
-      glow.fill({ color: 0xFF69B4, alpha });
+    const particleCount = 8;
+    const particles: { g: Graphics; offsetX: number; offsetY: number; baseRadius: number; speed: number; phase: number }[] = [];
+
+    for (let i = 0; i < particleCount; i++) {
+      const g = new Graphics();
+      glowGroup.addChild(g);
+      const angle = (i / particleCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+      const dist = this.cellSize * (0.05 + Math.random() * 0.15);
+      particles.push({
+        g,
+        offsetX: Math.cos(angle) * dist,
+        offsetY: Math.sin(angle) * dist,
+        baseRadius: this.cellSize * (0.15 + Math.random() * 0.2),
+        speed: 0.7 + Math.random() * 0.6,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+
+    tween(duration, (t) => {
+      for (const p of particles) {
+        p.g.clear();
+        const life = t * p.speed;
+        const expand = 0.5 + life * 0.8;
+        const radius = p.baseRadius * expand;
+        const drift = t * 1.3;
+
+        let alpha: number;
+        if (t < 0.15) {
+          alpha = (t / 0.15) * 0.4;
+        } else if (t < 0.5) {
+          alpha = 0.4 - (t - 0.15) * 0.15;
+        } else {
+          alpha = 0.35 * (1 - (t - 0.5) / 0.5) * 0.6;
+        }
+
+        const px = p.offsetX * drift + Math.sin(p.phase + t * 4) * 2;
+        const py = p.offsetY * drift + Math.cos(p.phase + t * 3) * 2;
+
+        p.g.circle(px, py, radius);
+        p.g.fill({ color: 0x000000, alpha: alpha * 0.3 });
+        p.g.circle(px, py, radius * 0.65);
+        p.g.fill({ color: 0x000000, alpha: alpha * 0.5 });
+        p.g.circle(px, py, radius * 0.3);
+        p.g.fill({ color: 0x000000, alpha: alpha * 0.7 });
+      }
     }, easeOutCubic);
   }
 

@@ -121,6 +121,37 @@ async function init() {
       gridView.update(ticker.deltaTime);
     });
 
+    // ── Background music (gapless loop via Web Audio API, starts on first user interaction) ──
+    const startBgMusic = async () => {
+      if (bgMusicStarted) return;
+      bgMusicStarted = true; // prevent multiple attempts
+
+      try {
+        bgMusicContext = new AudioContext();
+        const response = await fetch('/assets/sound/bg-music.wav');
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await bgMusicContext.decodeAudioData(arrayBuffer);
+
+        const gainNode = bgMusicContext.createGain();
+        gainNode.gain.value = 0.3;
+        gainNode.connect(bgMusicContext.destination);
+
+        const source = bgMusicContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.loop = true;
+        source.connect(gainNode);
+        source.start(0);
+        console.log('🎵 Background music started (Web Audio API, gapless loop)');
+      } catch (e) {
+        bgMusicStarted = false; // allow retry on next interaction
+        console.warn('🎵 Could not start background music, will retry:', e);
+      }
+    };
+
+    // Start music on any user interaction
+    window.addEventListener('click', startBgMusic);
+    window.addEventListener('keydown', startBgMusic);
+
     // ── Initialize Three.js 3D background ──
     if (DEBUG.BG_ENABLED) {
       const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
@@ -132,6 +163,13 @@ async function init() {
         });
         console.log('✅ Three.js 3D background initialized');
 
+        // Death debug mode: activate Death visual state persistently
+        if (DEBUG.DEATH_MODE) {
+          threeBg.setFeatureColor('T_DEATH');
+          threeBg.swapToDeath().then(() => {
+            console.log('💀 DEBUG: Death mode visuals activated (3D model + color tint)');
+          });
+        }
       }
     }
   } catch (error) {
@@ -153,12 +191,15 @@ let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
 let hasSpunOnce: boolean = false; // Track if any spin has happened
+let foolFeatureActive: boolean = false; // Track if Fool feature is currently running
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
 let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
 let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
 let currentPriestessAnimation: PriestessRevealAnimation | null = null; // Reference to active Priestess animation
 let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to active Death animation
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
+let bgMusicContext: AudioContext | null = null; // Web Audio API for gapless looping
+let bgMusicStarted = false;
 
 function resetState() {
   currentState = SpinState.IDLE;
@@ -170,6 +211,9 @@ function resetState() {
 }
 
 async function handleSpin() {
+  // ── FOOL FEATURE ACTIVE: Block all spin input ──
+  if (foolFeatureActive) return;
+
   // ── LOVERS FEATURE ACTIVE: Block all spin input ──
   if (loversFeatureActive) return;
 
@@ -239,9 +283,9 @@ async function handleSpin() {
   }
   currentSpinData = spinOutput;
 
-  // After 0.25s, unlock button for hurry-up (but not during features)
+  // After 0.25s, unlock button for hurry-up (but not during features or title card)
   skipEnableTimer = setTimeout(() => {
-    if (currentState === SpinState.SPINNING && !loversFeatureActive && !cupsFeatureActive && !priestessFeatureActive && !deathFeatureActive) {
+    if (currentState === SpinState.SPINNING && !foolFeatureActive && !loversFeatureActive && !cupsFeatureActive && !priestessFeatureActive && !deathFeatureActive) {
       canSkip = true;
       spinBtn.disabled = false;
     }
@@ -255,6 +299,7 @@ async function handleSpin() {
 
     // ── Phase 1.5: Flip cardbacks to reveal tarot faces ──
     if (spinOutput.tarotColumns.length > 0) {
+      canSkip = false; // Disable hurry-up during reveal
       spinBtn.disabled = true; // Lock button during reveal sequence
       await delay(400); // Suspense pause — player sees cardbacks
       await gridView.flipTarotColumns(spinOutput.tarotColumns);
@@ -263,6 +308,8 @@ async function handleSpin() {
 
     // ── Phase 1.75: Show tarot title card if a feature triggered ──
     if (spinOutput.feature) {
+      canSkip = false; // Disable hurry-up during title card
+      spinBtn.disabled = true; // Lock button during title card
       const titleDisplay = new TarotTitleDisplay();
       const gridCenter = gridView.getGridScreenCenter(app.canvas as HTMLCanvasElement);
       await titleDisplay.show(spinOutput.feature.type, 400, 1000, 400, gridCenter);
@@ -270,6 +317,7 @@ async function handleSpin() {
 
     // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
+      foolFeatureActive = true;
       spinBtn.disabled = true; // Lock button during reveal
       threeBg?.setFeatureColor('T_FOOL');
 
@@ -297,6 +345,7 @@ async function handleSpin() {
         spinOutput.totalWin,
         gameController.betAmount
       );
+      foolFeatureActive = false;
       threeBg?.clearFeatureColor();
       await threeBg?.restoreModel();
     }
@@ -499,8 +548,12 @@ async function handleSpin() {
 
       deathFeatureActive = false;
       currentDeathAnimation = null;
-      threeBg?.clearFeatureColor();
-      await threeBg?.restoreDeath();
+
+      // In Death debug mode, keep the visual state (3D model + color tint) active
+      if (!DEBUG.DEATH_MODE) {
+        threeBg?.clearFeatureColor();
+        await threeBg?.restoreDeath();
+      }
 
       // Restore grid to default 5×3 layout
       gridView.restoreDefaultGrid();
@@ -517,7 +570,12 @@ async function handleSpin() {
     }
 
     // ── Phase 2.9: Highlight winning symbols, then show win display ──
-    if (currentSpinData && currentSpinData.wins.length > 0) {
+    // Only for non-feature spins and Fool (which doesn't show its own win display).
+    // Cups, Priestess, Death, and Lovers handle wins internally — skip to avoid double display.
+    const featureType = spinOutput.feature?.type;
+    const skipWinDisplay = featureType === 'T_CUPS' || featureType === 'T_PRIESTESS' || featureType === 'T_DEATH' || featureType === 'T_LOVERS';
+
+    if (currentSpinData && currentSpinData.wins.length > 0 && !skipWinDisplay) {
       // First: radiate outlines on winning symbols
       paylineOverlay.showWinningPaylines(currentSpinData.wins, gridView.getReelSpinners());
       await delay(1000); // Let the radiating outline animation play fully
@@ -576,7 +634,7 @@ async function showResults() {
 
 function changeBet(direction: number): void {
   // Don't allow bet changes during a spin or feature
-  if (currentState !== SpinState.IDLE || cupsFeatureActive || loversFeatureActive || priestessFeatureActive || deathFeatureActive) return;
+  if (currentState !== SpinState.IDLE || foolFeatureActive || cupsFeatureActive || loversFeatureActive || priestessFeatureActive || deathFeatureActive) return;
 
   const newIndex = currentBetIndex + direction;
   if (newIndex < 0 || newIndex >= BET_STEPS.length) return;

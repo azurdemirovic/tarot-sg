@@ -31,11 +31,14 @@ export const DEBUG = {
   PRIESTESS_COLUMNS: [1, 3],
 
   /** Force Death feature on next spin (for testing) */
-  FORCE_DEATH: true,
+  FORCE_DEATH: false,
 
   /** Columns to place Death cards (2 or 3 columns) */
   DEATH_COLUMNS: [1, 3],
 
   /** Show payline connection lines (debug visualization) */
   SHOW_PAYLINES: false,
+
+  /** Death visual mode — keeps the Death UI (reap bar, spin counter, 3D model, color tint) active at all times */
+  DEATH_MODE: false,
 };

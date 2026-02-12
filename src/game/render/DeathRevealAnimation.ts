@@ -111,12 +111,14 @@ export class DeathRevealAnimation {
 
     try {
       // ── Phase A: Tear away Death tarot columns ──
-      await this.phaseTearTarots(feature);
+      // Start tear (don't await — reels start scrolling immediately alongside the tear)
+      const tearPromise = this.phaseTearTarots(feature);
 
       // ── Phase A2: Show reap bar ──
       this.createReapBar(totalWidth, deathResult);
 
       // ── Phase B: Multi-spin loop ──
+      let isFirstSpin = true;
       while (deathResult.spinsRemaining > 0) {
         const spinNum = deathResult.spinsTotal - deathResult.spinsRemaining + 1;
         console.log(`💀 Death Spin ${spinNum}/${deathResult.spinsTotal}`);
@@ -131,7 +133,13 @@ export class DeathRevealAnimation {
         const freshGrid = onGenerateFreshGrid(deathResult.gridCols, deathResult.gridRows, deathResult.stickyWilds);
 
         // B2: Spin the grid (sticky WILDs stay in place visually)
-        await this.phaseSpinFreshGrid(freshGrid, deathResult.stickyWilds);
+        // On first spin, run concurrently with the tear; otherwise just spin
+        if (isFirstSpin) {
+          await Promise.all([tearPromise, this.phaseSpinFreshGrid(freshGrid, deathResult.stickyWilds)]);
+          isFirstSpin = false;
+        } else {
+          await this.phaseSpinFreshGrid(freshGrid, deathResult.stickyWilds);
+        }
 
         // B2.5: Show sticky WILD glow overlays after grid lands
         this.showStickyWildOverlays(deathResult.stickyWilds);
@@ -166,9 +174,19 @@ export class DeathRevealAnimation {
         // B7: Update reap bar
         this.updateReapBar(deathResult);
 
-        // B8: If grid expanded, resize the grid view and show expansion flash
+        // B8: If grid expanded, animate the grid growing and show expansion notification
         if (spinResult.expanded) {
           this.clearStickyWildOverlays();
+
+          // Capture old grid dimensions for scale animation
+          const oldCols = this.cols;
+          const oldRows = this.rows;
+          const oldCellSize = this.cellSize;
+          const oldPadding = this.padding;
+          const oldWidth = oldCols * (oldCellSize + oldPadding) - oldPadding;
+          const oldHeight = oldRows * (oldCellSize + oldPadding) - oldPadding;
+
+          // Resize the grid data immediately (but we'll animate the visual)
           this.gridView.resizeGrid(deathResult.gridCols, deathResult.gridRows);
           // Update our local references after resize
           this.cellSize = this.gridView.getCellSize();
@@ -180,10 +198,20 @@ export class DeathRevealAnimation {
           // Show the new grid with current symbols
           this.gridView.updateGrid(spinResult.transformedGrid);
 
+          // Calculate new grid dimensions
+          const newWidth = this.cols * (this.cellSize + this.padding) - this.padding;
+          const newHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
+          // Start the grid at old scale and animate to new scale
+          const scaleX = oldWidth / newWidth;
+          const scaleY = oldHeight / newHeight;
+          this.gridView.scale.set(scaleX, scaleY);
+
           // Re-show sticky WILDs at new positions/sizes
           this.showStickyWildOverlays(deathResult.stickyWilds);
 
-          await this.phaseExpansionAnimation(deathResult, totalWidth);
+          // Animate grid growth alongside the expansion notification
+          await this.phaseExpansionAnimation(deathResult, totalWidth, scaleX, scaleY);
         }
 
         // B9: Accumulate payout
@@ -209,8 +237,8 @@ export class DeathRevealAnimation {
           );
         }
 
-        // Brief pause before next spin
-        await wait(300);
+        // Pause before next spin (slower transitions)
+        await wait(800);
       }
 
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
@@ -268,13 +296,7 @@ export class DeathRevealAnimation {
         container.x = offset.x + wild.col * step;
         container.y = offset.y + wild.row * step;
 
-        // Dark background to hide scrolling underneath
-        const bg = new Graphics();
-        bg.roundRect(0, 0, this.cellSize, this.cellSize, 0);
-        bg.fill({ color: 0x111111, alpha: 0.95 });
-        container.addChild(bg);
-
-        // WILD sprite from asset loader
+        // WILD sprite from asset loader (no background — symbol only)
         const wildTexture = this.assetLoader.getTexture('WILD');
         const sprite = new Sprite();
         if (wildTexture) {
@@ -316,90 +338,166 @@ export class DeathRevealAnimation {
     return this.gridView.getReelContainerOffset();
   }
 
-  // ── Highlight clusters ──
-  private async phaseHighlightClusters(spinResult: DeathSpinResult): Promise<void> {
-    const step = this.cellSize + this.padding;
-    const offset = this.getOffset();
-    const highlightOverlays: Graphics[] = [];
-
-    // Only highlight cells that will be slashed
-    for (const slash of spinResult.slashes) {
-      for (const cell of slash.cells) {
-        const g = new Graphics();
-        g.roundRect(
-          offset.x + cell.col * step,
-          offset.y + cell.row * step,
-          this.cellSize,
-          this.cellSize,
-          4
-        );
-        g.fill({ color: 0xff2222, alpha: 0.35 });
-        g.stroke({ width: 2, color: 0xff4444 });
-        g.alpha = 0;
-        this.parent.addChild(g);
-        highlightOverlays.push(g);
-      }
-    }
-
-    // Fade in
-    await tween(200, (t) => {
-      for (const g of highlightOverlays) g.alpha = t;
-    }, easeOutCubic);
-
-    await wait(400);
-
-    // Cleanup
-    for (const g of highlightOverlays) {
-      g.destroy();
-    }
+  // ── Highlight clusters (replaced with slash trail — no-op) ──
+  private async phaseHighlightClusters(_spinResult: DeathSpinResult): Promise<void> {
+    // Intentionally empty — slash trail handles the visual
   }
 
-  // ── Slash animation ──
+  // ── Slash animation (glowy red trail effect) ──
   private async phaseSlashAnimation(spinResult: DeathSpinResult): Promise<void> {
     const step = this.cellSize + this.padding;
     const offset = this.getOffset();
+    const halfCell = this.cellSize / 2;
 
-    // Flash slashed cells red, then fade out
-    const slashOverlays: Graphics[] = [];
-    for (const cell of spinResult.slashedCells) {
-      const g = new Graphics();
-      g.roundRect(
-        offset.x + cell.col * step,
-        offset.y + cell.row * step,
-        this.cellSize,
-        this.cellSize,
-        4
-      );
-      g.fill({ color: 0xff0000, alpha: 0.7 });
-      this.parent.addChild(g);
-      slashOverlays.push(g);
+    // Animate each slash as a glowing red trail from first to last cell
+    for (const slash of spinResult.slashes) {
+      if (slash.cells.length === 0) continue;
 
-      // Also dim the sprite underneath
-      const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
-      const sprite = sprites?.[cell.row];
-      if (sprite) sprite.alpha = 0.3;
-    }
+      // Build waypoints: center of each cell in order
+      const points = slash.cells.map(cell => ({
+        x: offset.x + cell.col * step + halfCell,
+        y: offset.y + cell.row * step + halfCell,
+      }));
 
-    // Flash effect
-    await wait(150);
-
-    // Fade out slashed cells
-    await tween(300, (t) => {
-      for (const g of slashOverlays) {
-        g.alpha = 0.7 * (1 - t);
+      // Calculate total path length for even speed
+      let totalLength = 0;
+      const segments: number[] = [0];
+      for (let i = 1; i < points.length; i++) {
+        const dx = points[i].x - points[i - 1].x;
+        const dy = points[i].y - points[i - 1].y;
+        totalLength += Math.sqrt(dx * dx + dy * dy);
+        segments.push(totalLength);
       }
-      // Fade out sprites
-      for (const cell of spinResult.slashedCells) {
+
+      // Many glow layers for an intense, wide, glowy trail
+      const trailLayers: Graphics[] = [];
+      const layerCount = 10;
+      for (let l = 0; l < layerCount; l++) {
+        const g = new Graphics();
+        this.parent.addChild(g);
+        trailLayers.push(g);
+      }
+
+      // Slash trail animates fast
+      const slashDuration = 180 + slash.cells.length * 35;
+      const trailFadeDuration = 500;
+
+      // Helper: get point at distance along path
+      const getPointAtDist = (dist: number) => {
+        for (let i = 1; i < segments.length; i++) {
+          if (dist <= segments[i]) {
+            const segStart = segments[i - 1];
+            const segLen = segments[i] - segStart;
+            const localT = segLen > 0 ? (dist - segStart) / segLen : 0;
+            return {
+              x: points[i - 1].x + (points[i].x - points[i - 1].x) * localT,
+              y: points[i - 1].y + (points[i].y - points[i - 1].y) * localT,
+            };
+          }
+        }
+        return points[points.length - 1];
+      };
+
+      // Build intermediate path points helper
+      const buildPath = (g: Graphics, tailDist: number, headDist: number) => {
+        const tail = getPointAtDist(tailDist);
+        const head = getPointAtDist(headDist);
+        g.moveTo(tail.x, tail.y);
+        for (let i = 1; i < points.length; i++) {
+          if (segments[i] > tailDist && segments[i] < headDist) {
+            g.lineTo(points[i].x, points[i].y);
+          }
+        }
+        g.lineTo(head.x, head.y);
+      };
+
+      // Phase 1: Trail races through cells — dark demonic slash
+      await tween(slashDuration, (t) => {
+        for (const g of trailLayers) g.clear();
+
+        const headDist = t * totalLength;
+        const trailLength = totalLength * 0.7;
+        const tailDist = Math.max(0, headDist - trailLength);
+        const head = getPointAtDist(headDist);
+
+        // Flicker factor — irregular pulsing for organic, fire-like feel
+        const flicker = 0.85 + 0.15 * Math.sin(t * 47) * Math.cos(t * 31);
+
+        // Layer 0: Wide dark shadow — the slash tears darkness into the scene
+        buildPath(trailLayers[0], tailDist, headDist);
+        trailLayers[0].stroke({ width: 110, color: 0x000000, alpha: 0.15 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 1: Dark crimson outer haze
+        buildPath(trailLayers[1], tailDist, headDist);
+        trailLayers[1].stroke({ width: 80, color: 0x330000, alpha: 0.18 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 2: Deep blood-red smoke
+        buildPath(trailLayers[2], tailDist, headDist);
+        trailLayers[2].stroke({ width: 56, color: 0x550000, alpha: 0.22 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 3: Dark red glow
+        buildPath(trailLayers[3], tailDist, headDist);
+        trailLayers[3].stroke({ width: 38, color: 0x880000, alpha: 0.3 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 4: Crimson fire
+        buildPath(trailLayers[4], tailDist, headDist);
+        trailLayers[4].stroke({ width: 26, color: 0xaa0000, alpha: 0.35 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 5: Hot ember red
+        buildPath(trailLayers[5], tailDist, headDist);
+        trailLayers[5].stroke({ width: 18, color: 0xcc1100, alpha: 0.4 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 6: Bright ember
+        buildPath(trailLayers[6], tailDist, headDist);
+        trailLayers[6].stroke({ width: 10, color: 0xdd2200, alpha: 0.5 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 7: Orange-red fire edge
+        buildPath(trailLayers[7], tailDist, headDist);
+        trailLayers[7].stroke({ width: 5, color: 0xee3300, alpha: 0.55 * flicker, cap: 'round', join: 'round' });
+
+        // Layer 8: Dark core — the wound itself is dark, not bright
+        buildPath(trailLayers[8], tailDist, headDist);
+        trailLayers[8].stroke({ width: 3, color: 0x220000, alpha: 0.7, cap: 'round', join: 'round' });
+
+        // Layer 9: Thin black scar center
+        buildPath(trailLayers[9], tailDist, headDist);
+        trailLayers[9].stroke({ width: 1.5, color: 0x110000, alpha: 0.8, cap: 'round', join: 'round' });
+
+        // Dark ember orb at head — smoldering, not shining
+        trailLayers[9].circle(head.x, head.y, 30);
+        trailLayers[9].fill({ color: 0x000000, alpha: 0.12 * flicker });
+        trailLayers[9].circle(head.x, head.y, 20);
+        trailLayers[9].fill({ color: 0x440000, alpha: 0.2 * flicker });
+        trailLayers[9].circle(head.x, head.y, 12);
+        trailLayers[9].fill({ color: 0x881100, alpha: 0.35 * flicker });
+        trailLayers[9].circle(head.x, head.y, 6);
+        trailLayers[9].fill({ color: 0xcc2200, alpha: 0.5 * flicker });
+        trailLayers[9].circle(head.x, head.y, 2);
+        trailLayers[9].fill({ color: 0xdd3300, alpha: 0.7 });
+      }, easeOutCubic);
+
+      // Dim slashed cell sprites as the trail completes
+      for (const cell of slash.cells) {
         const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
         const sprite = sprites?.[cell.row];
-        if (sprite) sprite.alpha = 0.3 * (1 - t);
+        if (sprite) sprite.alpha = 0.3;
       }
-    }, easeOutCubic);
 
-    // Remove overlays
-    for (const g of slashOverlays) g.destroy();
+      // Phase 2: Trail fades out, sprites fade out
+      await tween(trailFadeDuration, (t) => {
+        for (const g of trailLayers) g.alpha = 1 - t;
+        for (const cell of slash.cells) {
+          const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
+          const sprite = sprites?.[cell.row];
+          if (sprite) sprite.alpha = 0.3 * (1 - t);
+        }
+      }, easeOutCubic);
 
-    await wait(200);
+      // Cleanup trail layers
+      for (const g of trailLayers) g.destroy();
+    }
+
+    await wait(100);
   }
 
   // ── Refill animation ──
@@ -453,40 +551,55 @@ export class DeathRevealAnimation {
     }
   }
 
-  // ── Reap Bar ──
-  private createReapBar(totalWidth: number, deathResult: DeathResult): void {
+  // ── Reap Bar (vertical, left side) ──
+  private reapBarHeight: number = 0; // stored for updates
+
+  private createReapBar(_totalWidth: number, deathResult: DeathResult): void {
+    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+    const barWidth = 40;
+    const barHeight = totalHeight;
+    this.reapBarHeight = barHeight;
+
     this.reapBarContainer = new Container();
-    this.reapBarContainer.y = -35;
+    // Position on the left side, just outside the grid area (inside the frame border)
+    this.reapBarContainer.x = -barWidth - 70;
+    this.reapBarContainer.y = 0;
 
-    const barWidth = 200;
-    const barHeight = 16;
-    const barX = totalWidth - barWidth - 10;
-
-    // Background
+    // Background track
     const bg = new Graphics();
-    bg.roundRect(barX, 0, barWidth, barHeight, 4);
+    bg.roundRect(0, 0, barWidth, barHeight, 6);
     bg.fill({ color: 0x1a0000, alpha: 0.8 });
     bg.stroke({ width: 1, color: 0x661111 });
     this.reapBarContainer.addChild(bg);
 
-    // Fill
+    // Threshold tick marks
+    const maxThreshold = deathResult.reapThresholds[deathResult.reapThresholds.length - 1];
+    for (const threshold of deathResult.reapThresholds) {
+      const tickY = barHeight * (1 - threshold / maxThreshold);
+      const tick = new Graphics();
+      tick.moveTo(-3, tickY);
+      tick.lineTo(barWidth + 3, tickY);
+      tick.stroke({ width: 1.5, color: 0xff4444, alpha: 0.6 });
+      this.reapBarContainer.addChild(tick);
+    }
+
+    // Fill (grows from bottom up)
     this.reapBarFill = new Graphics();
     this.reapBarContainer.addChild(this.reapBarFill);
-    // Store barX in userData for updates
-    this.reapBarFill.x = barX;
 
-    // Text label
+    // Text label (rotated, alongside the bar)
     this.reapBarText = new Text({
-      text: `REAP: 0 / ${deathResult.reapThresholds[0]}`,
+      text: `REAP 0/${deathResult.reapThresholds[0]}`,
       style: new TextStyle({
         fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 14,
+        fontSize: 13,
         fill: 0xff6666,
         stroke: { color: 0x000000, width: 2 },
       }),
     });
-    this.reapBarText.anchor.set(1, 0.5);
-    this.reapBarText.x = barX - 8;
+    this.reapBarText.anchor.set(0.5, 0.5);
+    this.reapBarText.rotation = -Math.PI / 2;
+    this.reapBarText.x = barWidth / 2;
     this.reapBarText.y = barHeight / 2;
     this.reapBarContainer.addChild(this.reapBarText);
 
@@ -496,34 +609,30 @@ export class DeathRevealAnimation {
   private updateReapBar(deathResult: DeathResult): void {
     if (!this.reapBarFill || !this.reapBarText) return;
 
-    const barWidth = 200;
-    const barHeight = 16;
-    const barX = 0; // relative to the fill container
+    const barWidth = 40;
+    const barHeight = this.reapBarHeight;
+    const maxThreshold = deathResult.reapThresholds[deathResult.reapThresholds.length - 1];
 
-    // Determine current threshold
-    const nextThresholdIdx = deathResult.currentExpansion;
-    const currentThreshold = nextThresholdIdx < deathResult.reapThresholds.length
-      ? deathResult.reapThresholds[nextThresholdIdx]
-      : deathResult.reapThresholds[deathResult.reapThresholds.length - 1];
-    const prevThreshold = nextThresholdIdx > 0
-      ? deathResult.reapThresholds[nextThresholdIdx - 1]
-      : 0;
-
-    const progress = Math.min(
-      (deathResult.reapBar - prevThreshold) / (currentThreshold - prevThreshold),
-      1
-    );
-    const fillWidth = barWidth * Math.max(0, progress);
+    // Overall progress across all thresholds
+    const overallProgress = Math.min(deathResult.reapBar / maxThreshold, 1);
+    const fillHeight = barHeight * Math.max(0, overallProgress);
 
     this.reapBarFill.clear();
-    if (fillWidth > 0) {
-      this.reapBarFill.roundRect(barX, 0, fillWidth, barHeight, 4);
+    if (fillHeight > 0) {
+      // Fill grows from bottom up
+      this.reapBarFill.roundRect(0, barHeight - fillHeight, barWidth, fillHeight, 6);
       this.reapBarFill.fill({ color: 0xcc2222, alpha: 0.9 });
     }
 
+    // Determine current threshold for label
+    const nextThresholdIdx = deathResult.currentExpansion;
+    const currentThreshold = nextThresholdIdx < deathResult.reapThresholds.length
+      ? deathResult.reapThresholds[nextThresholdIdx]
+      : maxThreshold;
+
     const label = nextThresholdIdx >= deathResult.reapThresholds.length
-      ? `REAP: ${deathResult.reapBar} (MAX)`
-      : `REAP: ${deathResult.reapBar} / ${currentThreshold}`;
+      ? `REAP ${deathResult.reapBar} MAX`
+      : `REAP ${deathResult.reapBar}/${currentThreshold}`;
     this.reapBarText.text = label;
 
     // Pulse animation on reap bar
@@ -534,43 +643,61 @@ export class DeathRevealAnimation {
     }, easeOutCubic);
   }
 
-  // ── Expansion animation ──
-  private async phaseExpansionAnimation(deathResult: DeathResult, totalWidth: number): Promise<void> {
+  // ── Expansion animation (with grid growth) ──
+  private async phaseExpansionAnimation(
+    deathResult: DeathResult,
+    totalWidth: number,
+    startScaleX: number = 1,
+    startScaleY: number = 1
+  ): Promise<void> {
+    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
     // Flash the entire grid with a red pulse
     const flash = new Graphics();
-    flash.rect(0, 0, totalWidth, this.rows * (this.cellSize + this.padding) - this.padding);
-    flash.fill({ color: 0xff2222, alpha: 0.4 });
+    flash.rect(0, 0, totalWidth, totalHeight);
+    flash.fill({ color: 0xff2222, alpha: 0.5 });
     this.parent.addChild(flash);
 
-    // Show expansion text
+    // Show expansion text — large and prominent
     const expandText = new Text({
-      text: `GRID EXPANDED: ${deathResult.gridCols}×${deathResult.gridRows}\n+1 BONUS SPIN!`,
+      text: `GRID EXPANDED\n${deathResult.gridCols}×${deathResult.gridRows}\n+1 BONUS SPIN!`,
       style: new TextStyle({
         fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 28,
+        fontSize: 56,
         fill: 0xff4444,
-        stroke: { color: 0x000000, width: 4 },
-        letterSpacing: 2,
+        stroke: { color: 0x000000, width: 6 },
+        letterSpacing: 3,
+        align: 'center',
       }),
     });
     expandText.anchor.set(0.5);
     expandText.x = totalWidth / 2;
-    expandText.y = (this.rows * (this.cellSize + this.padding) - this.padding) / 2;
+    expandText.y = totalHeight / 2;
     expandText.alpha = 0;
     this.parent.addChild(expandText);
 
-    // Animate
-    await tween(400, (t) => {
-      flash.alpha = 0.4 * (1 - t);
-      expandText.alpha = Math.min(1, t * 2);
-      expandText.scale.set(0.5 + 0.5 * easeOutCubic(t));
+    // Animate text pop-in + grid scale growth together
+    await tween(800, (t) => {
+      // Flash fades
+      flash.alpha = 0.5 * (1 - t * 0.5);
+      // Text fades in and scales up
+      expandText.alpha = Math.min(1, t * 2.5);
+      expandText.scale.set(0.3 + 0.7 * easeOutCubic(t));
+      // Grid grows from old size to new size
+      const scaleX = startScaleX + (1 - startScaleX) * easeOutCubic(t);
+      const scaleY = startScaleY + (1 - startScaleY) * easeOutCubic(t);
+      this.gridView.scale.set(scaleX, scaleY);
     }, easeOutCubic);
+
+    // Ensure grid is at full scale
+    this.gridView.scale.set(1, 1);
 
     await wait(800);
 
-    // Fade out
-    await tween(300, (t) => {
+    // Fade out text and flash
+    await tween(400, (t) => {
       expandText.alpha = 1 - t;
+      flash.alpha = 0.25 * (1 - t);
     }, easeOutCubic);
 
     flash.destroy();
@@ -606,37 +733,8 @@ export class DeathRevealAnimation {
   }
 
   // ── Sticky WILD overlays ──
-  private showStickyWildOverlays(stickyWilds: { col: number; row: number }[]): void {
-    const step = this.cellSize + this.padding;
-    const offset = this.getOffset();
-
-    for (const wild of stickyWilds) {
-      if (wild.col >= this.cols || wild.row >= this.rows) continue;
-
-      const g = new Graphics();
-      const x = offset.x + wild.col * step;
-      const y = offset.y + wild.row * step;
-
-      // Golden glow border around sticky WILD cells
-      g.roundRect(x - 2, y - 2, this.cellSize + 4, this.cellSize + 4, 6);
-      g.stroke({ width: 3, color: 0xffdd00 });
-      g.fill({ color: 0xffdd00, alpha: 0.12 });
-
-      // Small lock indicator in the corner
-      const label = new Text({
-        text: '🔒',
-        style: new TextStyle({
-          fontSize: Math.max(10, Math.floor(this.cellSize * 0.14)),
-        }),
-      });
-      label.anchor.set(1, 0);
-      label.x = x + this.cellSize - 2;
-      label.y = y + 2;
-      g.addChild(label);
-
-      this.parent.addChild(g);
-      this.stickyWildOverlays.push(g);
-    }
+  private showStickyWildOverlays(_stickyWilds: { col: number; row: number }[]): void {
+    // No overlay — sticky WILDs are just left as-is on the grid
   }
 
   private clearStickyWildOverlays(): void {
