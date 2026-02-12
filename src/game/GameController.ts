@@ -2,7 +2,7 @@ import { RNG } from './RNG';
 import { AssetLoader } from './AssetLoader';
 import { SpinGenerator } from './logic/SpinGenerator';
 import { PaylineEvaluator } from './logic/PaylineEvaluator';
-import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult, PriestessResult, PriestessSpinResult } from './logic/TarotFeatureProcessor';
+import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult, PriestessResult, PriestessSpinResult, DeathResult, DeathSpinResult } from './logic/TarotFeatureProcessor';
 import { Grid, TarotColumn, FeatureTrigger, GameMode, WinLine } from './Types';
 
 export interface SpinOutput {
@@ -19,6 +19,8 @@ export interface SpinOutput {
   loversResult: LoversResult | null;
   /** If Priestess triggered, details of the mystery mode */
   priestessResult: PriestessResult | null;
+  /** If Death triggered, details of the reaping mode */
+  deathResult: DeathResult | null;
   /** The final grid used for payline evaluation (after feature, if any) */
   finalGrid: Grid;
   wins: WinLine[];
@@ -86,6 +88,7 @@ export class GameController {
     let cupsResult: CupsResult | null = null;
     let loversResult: LoversResult | null = null;
     let priestessResult: PriestessResult | null = null;
+    let deathResult: DeathResult | null = null;
     let multiplier = 1;
 
     if (feature) {
@@ -104,13 +107,16 @@ export class GameController {
         priestessResult = this.featureProcessor.applyPriestess(finalGrid, feature);
         multiplier = priestessResult.multiplier;
         // Grid is NOT transformed yet — deferred to per-spin mystery reveal
+      } else if (feature.type === 'T_DEATH') {
+        deathResult = this.featureProcessor.applyDeath(finalGrid, feature);
+        // Grid transforms are deferred to per-spin slash/refill
       }
-      // Other features (Death) → future implementation
     }
 
     // ── Phase 3: evaluate paylines on the *final* grid ──
-    // Skip evaluation for Lovers/Priestess — grid transforms are deferred
-    const wins = (feature?.type === 'T_LOVERS' || feature?.type === 'T_PRIESTESS')
+    // Skip evaluation for Lovers/Priestess/Death — grid transforms are deferred
+    const deferredFeatures = ['T_LOVERS', 'T_PRIESTESS', 'T_DEATH'];
+    const wins = (feature && deferredFeatures.includes(feature.type))
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
@@ -118,7 +124,9 @@ export class GameController {
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    if (feature?.type !== 'T_LOVERS' && feature?.type !== 'T_PRIESTESS') {
+    if (feature && !deferredFeatures.includes(feature.type)) {
+      this.balance += totalWin;
+    } else if (!feature) {
       this.balance += totalWin;
     }
 
@@ -146,6 +154,7 @@ export class GameController {
       cupsResult,
       loversResult,
       priestessResult,
+      deathResult,
       finalGrid,
       wins,
       totalWin,
@@ -162,6 +171,7 @@ export class GameController {
       cupsResult: null,
       loversResult: null,
       priestessResult: null,
+      deathResult: null,
       finalGrid: this.currentGrid!,
       wins: this.lastWins,
       totalWin: this.lastWin,
@@ -187,6 +197,7 @@ export class GameController {
     let cupsResult: CupsResult | null = null;
     let loversResult: LoversResult | null = null;
     let priestessResult: PriestessResult | null = null;
+    let deathResult: DeathResult | null = null;
     let multiplier = 1;
 
     if (feature && feature.type === 'T_FOOL') {
@@ -200,10 +211,13 @@ export class GameController {
     } else if (feature && feature.type === 'T_PRIESTESS') {
       priestessResult = this.featureProcessor.applyPriestess(finalGrid, feature);
       multiplier = priestessResult.multiplier;
+    } else if (feature && feature.type === 'T_DEATH') {
+      deathResult = this.featureProcessor.applyDeath(finalGrid, feature);
     }
 
-    // Skip evaluation for Lovers/Priestess — grid transforms are deferred
-    const wins = (feature?.type === 'T_LOVERS' || feature?.type === 'T_PRIESTESS')
+    // Skip evaluation for deferred features
+    const deferredFeatures = ['T_LOVERS', 'T_PRIESTESS', 'T_DEATH'];
+    const wins = (feature && deferredFeatures.includes(feature.type))
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
@@ -211,13 +225,13 @@ export class GameController {
     const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
     const totalWin = baseWin * multiplier;
     this.lastWin = totalWin;
-    if (feature?.type !== 'T_LOVERS' && feature?.type !== 'T_PRIESTESS') {
+    if (!feature || !deferredFeatures.includes(feature.type)) {
       this.balance += totalWin;
     }
 
     this.isSpinning = false;
 
-    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, loversResult, priestessResult, finalGrid, wins, totalWin, multiplier };
+    return { initialGrid, tarotColumns, feature, foolResult, cupsResult, loversResult, priestessResult, deathResult, finalGrid, wins, totalWin, multiplier };
   }
 
   /**
@@ -325,6 +339,48 @@ export class GameController {
     }
 
     return { spinResult, wins, totalWin, multiplier };
+  }
+
+  /**
+   * Generate a fresh random grid for Death multi-spin (variable size).
+   * Sticky WILDs are placed first, then remaining cells are filled randomly.
+   */
+  generateDeathGrid(cols: number, rows: number, stickyWilds: { col: number; row: number }[] = []): Grid {
+    const { grid } = this.spinGenerator.generateSpin(cols, rows, 0); // 0 tarot chance
+
+    // Overwrite sticky WILD positions — these persist across spins
+    for (const wild of stickyWilds) {
+      if (wild.col < cols && wild.row < rows && grid[wild.col]) {
+        grid[wild.col][wild.row] = { col: wild.col, row: wild.row, symbolId: 'WILD' };
+      }
+    }
+
+    this.currentGrid = grid;
+    return grid.map(col => col.map(cell => ({ ...cell }))); // deep clone
+  }
+
+  /**
+   * Apply a single Death spin: detect clusters, slash, refill, check expansion.
+   * Uses cluster-based payouts (not paylines).
+   * Called per-spin during the Death multi-spin feature.
+   */
+  applyDeathSpin(
+    grid: Grid,
+    deathResult: DeathResult
+  ): { spinResult: DeathSpinResult; totalWin: number } {
+    const spinResult = this.featureProcessor.applyDeathSpin(grid, deathResult, this.betAmount);
+
+    // Sum cluster-based payouts (no paylines for Death)
+    const totalWin = spinResult.clusterWins.reduce((sum, cw) => sum + cw.payout, 0);
+
+    this.lastWins = [];
+    this.lastWin = totalWin;
+
+    if (spinResult.clusterWins.length > 0) {
+      console.log(`💀 Death Spin ${deathResult.spinsTotal - deathResult.spinsRemaining}/${deathResult.spinsTotal}: ${spinResult.clusterWins.length} Cluster Win(s), Total: ${totalWin.toFixed(4)} EUR`);
+    }
+
+    return { spinResult, totalWin };
   }
 
   getSeed(): number { return this.rng.getState(); }

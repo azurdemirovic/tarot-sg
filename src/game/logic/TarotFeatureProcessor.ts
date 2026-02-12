@@ -47,6 +47,51 @@ export interface PriestessSpinResult {
   transformedGrid: Grid;                              // grid after mystery reveal
 }
 
+export interface DeathResult {
+  spinsTotal: number;            // always 10
+  spinsRemaining: number;
+  columns: number[];             // triggering Death columns
+  reapBar: number;               // accumulated reaped symbols
+  reapThresholds: number[];      // [10, 20, 30] — expansion triggers
+  currentExpansion: number;      // 0, 1, 2, or 3 (how many expansions done)
+  gridCols: number;              // current grid width (starts 5)
+  gridRows: number;              // current grid height (starts 3)
+  stickyWilds: { col: number; row: number }[];  // positions of sticky WILDs that persist across spins
+}
+
+export interface DeathCluster {
+  symbolId: string;
+  cells: { col: number; row: number }[];
+}
+
+export interface DeathSlash {
+  cells: { col: number; row: number }[];
+  symbolId: string;
+}
+
+export interface DeathClusterWin {
+  symbolId: string;
+  clusterSize: number;
+  payMultiplier: number;        // multiplier of bet (e.g., 0.5, 2, 10)
+  payout: number;               // payMultiplier × betAmount
+}
+
+export interface DeathSpinResult {
+  clusters: DeathCluster[];
+  slashes: DeathSlash[];
+  slashedCells: { col: number; row: number }[];
+  refillCells: { col: number; row: number; symbolId: string }[];
+  newStickyWilds: { col: number; row: number }[];  // WILDs left behind after slash this spin
+  removedWilds: { col: number; row: number }[];     // sticky WILDs consumed by being slashed
+  clusterWins: DeathClusterWin[];  // cluster-based payouts for this spin
+  reaped: number;                // symbols reaped this spin
+  totalReaped: number;           // total reap bar after this spin
+  expanded: boolean;             // whether grid expanded this spin
+  newGridCols: number;           // grid cols after expansion (if any)
+  newGridRows: number;           // grid rows after expansion (if any)
+  transformedGrid: Grid;         // final grid after slash + refill
+}
+
 export class TarotFeatureProcessor {
   constructor(
     private rng: RNG,
@@ -411,6 +456,467 @@ export class TarotFeatureProcessor {
       mysteryCells: allMysteryCells,
       newMysteryCells,
       mysterySymbolId,
+      transformedGrid: grid,
+    };
+  }
+
+  // ── DEATH ─────────────────────────────────────────────────────
+
+  /**
+   * Apply the Death feature (initial trigger).
+   * Determines spin count and initializes the reap bar.
+   * Duration: always 10 spins.
+   */
+  applyDeath(_grid: Grid, trigger: FeatureTrigger): DeathResult {
+    const spinsTotal = 10;
+
+    console.log(`💀 Death Feature: ${trigger.count} Death → ${spinsTotal} spins`);
+
+    return {
+      spinsTotal,
+      spinsRemaining: spinsTotal,
+      columns: [...trigger.columns],
+      reapBar: 0,
+      reapThresholds: [10, 20, 30],
+      currentExpansion: 0,
+      gridCols: 5,
+      gridRows: 3,
+      stickyWilds: [],
+    };
+  }
+
+  /**
+   * Find all clusters of adjacent matching symbols.
+   * Adjacency: horizontal, vertical, AND diagonal (8-connected).
+   * WILD symbols count as matching ANY symbol — they can seed clusters
+   * and join any adjacent cluster. A group of pure WILDs also forms a cluster.
+   * Minimum cluster size scales with expansion: 3 → 4 → 5 → 6.
+   */
+  private findClusters(grid: Grid, cols: number, rows: number, minSize: number): DeathCluster[] {
+    const visited = new Set<string>();
+    const clusters: DeathCluster[] = [];
+
+    const key = (c: number, r: number) => `${c},${r}`;
+    const directions = [
+      [-1, -1], [-1, 0], [-1, 1],
+      [0, -1],           [0, 1],
+      [1, -1],  [1, 0],  [1, 1],
+    ];
+
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const k = key(c, r);
+        if (visited.has(k)) continue;
+        if (!grid[c] || !grid[c][r]) continue;
+
+        const symbolId = grid[c][r].symbolId;
+        // Skip tarots for clustering
+        if (symbolId.startsWith('T_')) continue;
+
+        // BFS to find all connected cells.
+        // For non-WILD seeds: match same symbol OR WILD neighbors.
+        // For WILD seeds: match any non-tarot neighbor (WILD matches everything).
+        const clusterCells: { col: number; row: number }[] = [];
+        const queue: { col: number; row: number }[] = [{ col: c, row: r }];
+        visited.add(k);
+
+        // Track the "dominant" symbol of the cluster (first non-WILD, or WILD if all WILDs)
+        let dominantSymbol = symbolId;
+
+        while (queue.length > 0) {
+          const cell = queue.shift()!;
+          clusterCells.push(cell);
+
+          const cellSymbol = grid[cell.col][cell.row].symbolId;
+
+          // If this cell is non-WILD, adopt it as the dominant symbol
+          if (cellSymbol !== 'WILD' && dominantSymbol === 'WILD') {
+            dominantSymbol = cellSymbol;
+          }
+
+          for (const [dc, dr] of directions) {
+            const nc = cell.col + dc;
+            const nr = cell.row + dr;
+            if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+            const nk = key(nc, nr);
+            if (visited.has(nk)) continue;
+            if (!grid[nc] || !grid[nc][nr]) continue;
+            const neighborId = grid[nc][nr].symbolId;
+            if (neighborId.startsWith('T_')) continue;
+
+            // WILD matches everything; non-WILD cells match same symbol or WILD
+            const matches =
+              neighborId === 'WILD' ||
+              cellSymbol === 'WILD' ||
+              neighborId === dominantSymbol ||
+              (dominantSymbol === 'WILD'); // pure WILD cluster absorbs anything
+
+            if (matches) {
+              visited.add(nk);
+              queue.push({ col: nc, row: nr });
+
+              // Update dominant if we found a non-WILD in what was a pure WILD cluster
+              if (neighborId !== 'WILD' && dominantSymbol === 'WILD') {
+                dominantSymbol = neighborId;
+              }
+            }
+          }
+        }
+
+        // Only keep clusters that meet the minimum size
+        if (clusterCells.length >= minSize) {
+          clusters.push({ symbolId: dominantSymbol, cells: clusterCells });
+        }
+      }
+    }
+
+    return clusters;
+  }
+
+  /**
+   * Select the best cluster to slash according to priority:
+   * 1. Largest cluster size
+   * 2. Higher-paying symbol type
+   * 3. Leftmost position
+   * 4. Topmost position
+   */
+  private selectBestCluster(clusters: DeathCluster[]): DeathCluster | null {
+    if (clusters.length === 0) return null;
+
+    const getSymbolPayValue = (symbolId: string): number => {
+      const sym = this.assetLoader.getSymbol(symbolId);
+      return sym ? (sym.payValues[4] || sym.payValues[3] || 0) : 0;
+    };
+
+    clusters.sort((a, b) => {
+      // 1. Largest cluster
+      if (b.cells.length !== a.cells.length) return b.cells.length - a.cells.length;
+      // 2. Higher paying symbol
+      const payA = getSymbolPayValue(a.symbolId);
+      const payB = getSymbolPayValue(b.symbolId);
+      if (payB !== payA) return payB - payA;
+      // 3. Leftmost
+      const minColA = Math.min(...a.cells.map(c => c.col));
+      const minColB = Math.min(...b.cells.map(c => c.col));
+      if (minColA !== minColB) return minColA - minColB;
+      // 4. Topmost
+      const minRowA = Math.min(...a.cells.map(c => c.row));
+      const minRowB = Math.min(...b.cells.map(c => c.row));
+      return minRowA - minRowB;
+    });
+
+    return clusters[0];
+  }
+
+  /**
+   * Select a slash line within a cluster:
+   * 1. Longest horizontal run of ≥2
+   * 2. Else longest vertical run
+   * 3. Else longest diagonal run
+   * 4. Else any valid 2+ symbols in cluster
+   */
+  private selectSlashLine(cluster: DeathCluster): { col: number; row: number }[] {
+    // Helper: find longest consecutive run in a direction
+    const findRuns = (
+      sortFn: (a: { col: number; row: number }, b: { col: number; row: number }) => number,
+      groupKey: (c: { col: number; row: number }) => string,
+      nextKey: (c: { col: number; row: number }) => string
+    ): { col: number; row: number }[] => {
+      const sorted = [...cluster.cells].sort(sortFn);
+      const groups = new Map<string, { col: number; row: number }[]>();
+      for (const cell of sorted) {
+        const gk = groupKey(cell);
+        if (!groups.has(gk)) groups.set(gk, []);
+        groups.get(gk)!.push(cell);
+      }
+
+      let bestRun: { col: number; row: number }[] = [];
+      for (const [, cells] of groups) {
+        let currentRun: { col: number; row: number }[] = [cells[0]];
+        for (let i = 1; i < cells.length; i++) {
+          if (nextKey(cells[i]) === nextKey(cells[i - 1])) {
+            // Same position in the varying axis — skip
+            continue;
+          }
+          const prevNk = nextKey(cells[i - 1]);
+          const currNk = nextKey(cells[i]);
+          if (parseInt(currNk) - parseInt(prevNk) === 1) {
+            currentRun.push(cells[i]);
+          } else {
+            if (currentRun.length >= 2 && currentRun.length > bestRun.length) {
+              bestRun = [...currentRun];
+            }
+            currentRun = [cells[i]];
+          }
+        }
+        if (currentRun.length >= 2 && currentRun.length > bestRun.length) {
+          bestRun = [...currentRun];
+        }
+      }
+      return bestRun;
+    };
+
+    // 1. Horizontal runs (same row, consecutive cols)
+    const hRun = findRuns(
+      (a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col,
+      c => `${c.row}`,
+      c => `${c.col}`
+    );
+    if (hRun.length >= 2) return hRun;
+
+    // 2. Vertical runs (same col, consecutive rows)
+    const vRun = findRuns(
+      (a, b) => a.col !== b.col ? a.col - b.col : a.row - b.row,
+      c => `${c.col}`,
+      c => `${c.row}`
+    );
+    if (vRun.length >= 2) return vRun;
+
+    // 3. Diagonal runs — check both directions
+    // Diagonal ↘: same (col - row), sorted by col
+    const diagA = findRuns(
+      (a, b) => {
+        const da = a.col - a.row;
+        const db = b.col - b.row;
+        return da !== db ? da - db : a.col - b.col;
+      },
+      c => `${c.col - c.row}`,
+      c => `${c.col}`
+    );
+    if (diagA.length >= 2) return diagA;
+
+    // Diagonal ↗: same (col + row), sorted by col
+    const diagB = findRuns(
+      (a, b) => {
+        const da = a.col + a.row;
+        const db = b.col + b.row;
+        return da !== db ? da - db : a.col - b.col;
+      },
+      c => `${c.col + c.row}`,
+      c => `${c.col}`
+    );
+    if (diagB.length >= 2) return diagB;
+
+    // 4. Fallback: take any 2 cells from the cluster
+    return cluster.cells.slice(0, Math.min(2, cluster.cells.length));
+  }
+
+  /**
+   * Calculate cluster-based payout for a slashed cluster.
+   * Payout scales with cluster size and symbol tier:
+   *   LOW:     3=×0.5  4=×2   5=×5   6+=×10
+   *   PREMIUM: 3=×1    4=×5   5=×15  6+=×30
+   *   WILD:    3=×2    4=×10  5=×25  6+=×50
+   */
+  private calculateClusterPayout(symbolId: string, clusterSize: number, betAmount: number): DeathClusterWin {
+    const sym = this.assetLoader.getSymbol(symbolId);
+    const tier = sym?.tier || 'LOW';
+
+    let payMultiplier: number;
+
+    if (tier === 'PREMIUM') {
+      if (clusterSize >= 6) payMultiplier = 30;
+      else if (clusterSize === 5) payMultiplier = 15;
+      else if (clusterSize === 4) payMultiplier = 5;
+      else payMultiplier = 1;
+    } else if (tier === 'WILD') {
+      if (clusterSize >= 6) payMultiplier = 50;
+      else if (clusterSize === 5) payMultiplier = 25;
+      else if (clusterSize === 4) payMultiplier = 10;
+      else payMultiplier = 2;
+    } else {
+      // LOW and anything else
+      if (clusterSize >= 6) payMultiplier = 10;
+      else if (clusterSize === 5) payMultiplier = 5;
+      else if (clusterSize === 4) payMultiplier = 2;
+      else payMultiplier = 0.5;
+    }
+
+    return {
+      symbolId,
+      clusterSize,
+      payMultiplier,
+      payout: payMultiplier * betAmount,
+    };
+  }
+
+  /**
+   * Apply a single Death spin: detect clusters, slash, maybe leave sticky WILDs,
+   * refill, check expansion. Sticky WILDs persist across spins.
+   *
+   * Cluster minimum size scales: 3 (base) → 4 (1st expansion) → 5 → 6.
+   * Slashed cells have ~15% chance to leave a sticky WILD behind.
+   * If a sticky WILD is part of a slashed cluster, it gets consumed (removed).
+   */
+  applyDeathSpin(
+    grid: Grid,
+    deathResult: DeathResult,
+    betAmount: number = 0.20
+  ): DeathSpinResult {
+    const cols = deathResult.gridCols;
+    const rows = deathResult.gridRows;
+
+    // Min cluster size scales with expansion: 3, 4, 5, 6
+    const minClusterSize = 3 + deathResult.currentExpansion;
+
+    // 1. Find clusters meeting the minimum size requirement
+    const clusters = this.findClusters(grid, cols, rows, minClusterSize);
+
+    // 2. Perform 1-3 slashes
+    const slashCount = Math.min(
+      clusters.length > 0 ? this.rng.nextInt(1, Math.min(3, clusters.length)) : 0,
+      3
+    );
+
+    const slashes: DeathSlash[] = [];
+    const allSlashedCells: { col: number; row: number }[] = [];
+    const slashedSet = new Set<string>();
+
+    // Copy clusters so we can modify them as we slash
+    let remainingClusters = clusters.map(c => ({
+      symbolId: c.symbolId,
+      cells: [...c.cells],
+    }));
+
+    for (let s = 0; s < slashCount; s++) {
+      // Re-sort and pick best remaining cluster
+      const best = this.selectBestCluster(
+        remainingClusters.filter(c => c.cells.length >= minClusterSize)
+      );
+      if (!best) break;
+
+      // Select slash line within cluster
+      const slashCells = this.selectSlashLine(best);
+
+      slashes.push({ cells: slashCells, symbolId: best.symbolId });
+
+      for (const cell of slashCells) {
+        const k = `${cell.col},${cell.row}`;
+        if (!slashedSet.has(k)) {
+          slashedSet.add(k);
+          allSlashedCells.push(cell);
+        }
+      }
+
+      // Remove slashed cells from the cluster for subsequent slashes
+      const slashedKeys = new Set(slashCells.map(c => `${c.col},${c.row}`));
+      best.cells = best.cells.filter(c => !slashedKeys.has(`${c.col},${c.row}`));
+      remainingClusters = remainingClusters.map(c => ({
+        symbolId: c.symbolId,
+        cells: c.cells.filter(cell => !slashedKeys.has(`${cell.col},${cell.row}`)),
+      })).filter(c => c.cells.length >= minClusterSize);
+    }
+
+    // 3. Calculate cluster-based payouts for each slash
+    const clusterWins: DeathClusterWin[] = [];
+    for (const slash of slashes) {
+      const win = this.calculateClusterPayout(slash.symbolId, slash.cells.length, betAmount);
+      clusterWins.push(win);
+      console.log(`💀 Cluster Win: ${slash.cells.length}× ${slash.symbolId} → ×${win.payMultiplier} = ${win.payout.toFixed(4)} EUR`);
+    }
+
+    // 4. Track which sticky WILDs were consumed (slashed)
+    const stickyWildSet = new Set(deathResult.stickyWilds.map(w => `${w.col},${w.row}`));
+    const removedWilds: { col: number; row: number }[] = [];
+    for (const cell of allSlashedCells) {
+      const k = `${cell.col},${cell.row}`;
+      if (stickyWildSet.has(k)) {
+        removedWilds.push(cell);
+        stickyWildSet.delete(k);
+      }
+    }
+
+    // 5. Update reap bar
+    const reaped = allSlashedCells.length;
+    deathResult.reapBar += reaped;
+
+    // 6. Determine which slashed cells leave a sticky WILD behind (~15% chance)
+    const WILD_CHANCE = 0.15;
+    const newStickyWilds: { col: number; row: number }[] = [];
+    const normalSymbols = this.assetLoader.getNormalSymbols();
+    const normalWeights = normalSymbols.map(s => s.baseWeight);
+    const refillCells: { col: number; row: number; symbolId: string }[] = [];
+
+    for (const cell of allSlashedCells) {
+      const k = `${cell.col},${cell.row}`;
+      if (this.rng.nextFloat() < WILD_CHANCE) {
+        // Leave a sticky WILD in this cell
+        grid[cell.col][cell.row] = { col: cell.col, row: cell.row, symbolId: 'WILD' };
+        refillCells.push({ col: cell.col, row: cell.row, symbolId: 'WILD' });
+        newStickyWilds.push(cell);
+        stickyWildSet.add(k);
+      } else {
+        // Refill with a normal random symbol
+        const newSymbol = this.rng.weightedChoice(normalSymbols, normalWeights);
+        grid[cell.col][cell.row] = { col: cell.col, row: cell.row, symbolId: newSymbol.id };
+        refillCells.push({ col: cell.col, row: cell.row, symbolId: newSymbol.id });
+      }
+    }
+
+    // 6. Update the persistent sticky WILDs list
+    deathResult.stickyWilds = Array.from(stickyWildSet).map(k => {
+      const [c, r] = k.split(',').map(Number);
+      return { col: c, row: r };
+    });
+
+    // 7. Check for grid expansion
+    let expanded = false;
+    const maxCols = 8;
+    const maxRows = 6;
+
+    while (
+      deathResult.currentExpansion < deathResult.reapThresholds.length &&
+      deathResult.reapBar >= deathResult.reapThresholds[deathResult.currentExpansion] &&
+      deathResult.gridCols < maxCols &&
+      deathResult.gridRows < maxRows
+    ) {
+      deathResult.currentExpansion++;
+      deathResult.gridCols++;
+      deathResult.gridRows++;
+      expanded = true;
+
+      // Add new column
+      const newCol = deathResult.gridCols - 1;
+      grid[newCol] = [];
+      for (let r = 0; r < deathResult.gridRows; r++) {
+        const sym = this.rng.weightedChoice(normalSymbols, normalWeights);
+        grid[newCol][r] = { col: newCol, row: r, symbolId: sym.id };
+      }
+
+      // Add new row to all columns
+      const newRow = deathResult.gridRows - 1;
+      for (let c = 0; c < deathResult.gridCols; c++) {
+        if (!grid[c][newRow]) {
+          const sym = this.rng.weightedChoice(normalSymbols, normalWeights);
+          grid[c][newRow] = { col: c, row: newRow, symbolId: sym.id };
+        }
+      }
+
+      // Grant 1 extra spin per expansion
+      deathResult.spinsRemaining++;
+      deathResult.spinsTotal++;
+
+      console.log(`💀 Grid expanded to ${deathResult.gridCols}×${deathResult.gridRows}! Min cluster size now: ${3 + deathResult.currentExpansion}, +1 bonus spin (${deathResult.spinsRemaining} left)`);
+    }
+
+    // 8. Decrement spins
+    deathResult.spinsRemaining--;
+
+    console.log(`💀 Death Spin: ${slashes.length} slashes, ${reaped} reaped (total: ${deathResult.reapBar}), ${newStickyWilds.length} new WILDs, ${deathResult.stickyWilds.length} sticky WILDs, ${deathResult.spinsRemaining} spins left`);
+
+    return {
+      clusters,
+      slashes,
+      slashedCells: allSlashedCells,
+      refillCells,
+      newStickyWilds,
+      removedWilds,
+      clusterWins,
+      reaped,
+      totalReaped: deathResult.reapBar,
+      expanded,
+      newGridCols: deathResult.gridCols,
+      newGridRows: deathResult.gridRows,
       transformedGrid: grid,
     };
   }

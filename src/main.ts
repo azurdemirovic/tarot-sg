@@ -7,6 +7,7 @@ import { FoolRevealAnimation } from './game/render/FoolRevealAnimation';
 import { CupsRevealAnimation } from './game/render/CupsRevealAnimation';
 import { LoversRevealAnimation } from './game/render/LoversRevealAnimation';
 import { PriestessRevealAnimation } from './game/render/PriestessRevealAnimation';
+import { DeathRevealAnimation } from './game/render/DeathRevealAnimation';
 import { ThreeBackground } from './threeBackground';
 import { TarotTitleDisplay } from './game/render/TarotTitleDisplay';
 import { DEBUG } from './game/config/debug';
@@ -21,6 +22,7 @@ let gridView: GridView;
 let paylineOverlay: PaylineOverlay;
 let canSkip: boolean = false;
 let priestessFeatureActive: boolean = false;
+let deathFeatureActive: boolean = false;
 
 // UI Elements
 const spinBtn = document.getElementById('spin-btn') as HTMLButtonElement;
@@ -155,6 +157,7 @@ let cupsFeatureActive: boolean = false; // Track if Cups feature is currently ru
 let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
 let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
 let currentPriestessAnimation: PriestessRevealAnimation | null = null; // Reference to active Priestess animation
+let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to active Death animation
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
 
 function resetState() {
@@ -169,6 +172,15 @@ function resetState() {
 async function handleSpin() {
   // ── LOVERS FEATURE ACTIVE: Block all spin input ──
   if (loversFeatureActive) return;
+
+  // ── DEATH FEATURE ACTIVE: Hurry up reel spin ──
+  if (deathFeatureActive && currentDeathAnimation) {
+    if (currentDeathAnimation.isReelSpinActive()) {
+      console.log('⚡ Hurrying up Death reel spin');
+      currentDeathAnimation.requestHurryUp();
+    }
+    return;
+  }
 
   // ── PRIESTESS FEATURE ACTIVE: Hurry up reel spin ──
   if (priestessFeatureActive && currentPriestessAnimation) {
@@ -217,6 +229,10 @@ async function handleSpin() {
     console.log('🔧 DEBUG: Forcing Priestess feature (first spin only)');
     hasSpunOnce = true;
     spinOutput = gameController.forceTarotSpin('T_PRIESTESS', DEBUG.PRIESTESS_COLUMNS);
+  } else if (!hasSpunOnce && DEBUG.FORCE_DEATH) {
+    console.log('🔧 DEBUG: Forcing Death feature (first spin only)');
+    hasSpunOnce = true;
+    spinOutput = gameController.forceTarotSpin('T_DEATH', DEBUG.DEATH_COLUMNS);
   } else {
     spinOutput = gameController.spin();
     hasSpunOnce = true;
@@ -225,7 +241,7 @@ async function handleSpin() {
 
   // After 0.25s, unlock button for hurry-up (but not during features)
   skipEnableTimer = setTimeout(() => {
-    if (currentState === SpinState.SPINNING && !loversFeatureActive && !cupsFeatureActive && !priestessFeatureActive) {
+    if (currentState === SpinState.SPINNING && !loversFeatureActive && !cupsFeatureActive && !priestessFeatureActive && !deathFeatureActive) {
       canSkip = true;
       spinBtn.disabled = false;
     }
@@ -440,6 +456,63 @@ async function handleSpin() {
       }
     }
 
+    // ── Phase 2e: If a Death feature triggered, play the reaping animation ──
+    if (spinOutput.feature && spinOutput.feature.type === 'T_DEATH' && spinOutput.deathResult) {
+      spinBtn.disabled = false; // Allow spin button for hurry-up during reel spins
+      deathFeatureActive = true;
+      threeBg?.setFeatureColor('T_DEATH');
+
+      // Bring in the Death 3D model
+      await threeBg?.swapToDeath();
+
+      const deathReveal = new DeathRevealAnimation(
+        gridView,
+        gridView.getReelSpinners(),
+        assetLoader,
+        gridView.getCellSize(),
+        gridView.getPadding(),
+        gridView.getCols(),
+        gridView.getRows(),
+        gridView,
+        threeBg,
+        app.canvas as HTMLCanvasElement
+      );
+
+      currentDeathAnimation = deathReveal;
+
+      const deathResult = spinOutput.deathResult;
+
+      const deathPayout = await deathReveal.play(
+        spinOutput.feature,
+        deathResult,
+        (cols, rows, stickyWilds) => {
+          return gameController.generateDeathGrid(cols, rows, stickyWilds);
+        },
+        (grid, dr) => {
+          return gameController.applyDeathSpin(grid, dr);
+        },
+        gameController.betAmount
+      );
+
+      deathFeatureActive = false;
+      currentDeathAnimation = null;
+      threeBg?.clearFeatureColor();
+      await threeBg?.restoreDeath();
+
+      // Restore grid to default 5×3 layout
+      gridView.restoreDefaultGrid();
+
+      // Restore all reel columns to visible
+      for (let col = 0; col < gridView.getCols(); col++) {
+        gridView.getReelSpinners()[col].setColumnVisible(true);
+      }
+
+      // Apply total payout to balance
+      gameController.balance += deathPayout;
+      gameController.lastWin = deathPayout;
+      currentSpinData.totalWin = deathPayout;
+    }
+
     // ── Phase 3: Show results ──
     await showResults();
   } catch (error) {
@@ -480,7 +553,7 @@ async function showResults() {
 
 function changeBet(direction: number): void {
   // Don't allow bet changes during a spin or feature
-  if (currentState !== SpinState.IDLE || cupsFeatureActive || loversFeatureActive || priestessFeatureActive) return;
+  if (currentState !== SpinState.IDLE || cupsFeatureActive || loversFeatureActive || priestessFeatureActive || deathFeatureActive) return;
 
   const newIndex = currentBetIndex + direction;
   if (newIndex < 0 || newIndex >= BET_STEPS.length) return;

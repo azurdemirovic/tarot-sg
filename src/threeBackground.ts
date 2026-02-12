@@ -63,6 +63,8 @@ export class ThreeBackground {
   private solMixer: THREE.AnimationMixer | null = null;
   private isSolSwapped: boolean = false;
   private solReady: boolean = false; // True once model is fully compiled on GPU
+  private solBaseY: number = 1.5; // Base Y position for float animation
+  private solAnimTime: number = 0;
 
   // Sol glow effect (organic noisy sprite)
   private solGlow: THREE.Sprite | null = null;
@@ -78,6 +80,15 @@ export class ThreeBackground {
 
   // Queen glow effect (organic noisy sprite)
   private queenGlow: THREE.Sprite | null = null;
+
+  // Death model (appears during Death feature only)
+  private deathModel: THREE.Object3D | null = null;
+  private deathMixer: THREE.AnimationMixer | null = null;
+  private isDeathSwapped: boolean = false;
+  private deathReady: boolean = false;
+
+  // Death glow effect (organic noisy sprite)
+  private deathGlow: THREE.Sprite | null = null;
 
   
   constructor(options: ThreeBgOptions) {
@@ -166,6 +177,9 @@ export class ThreeBackground {
 
     // ── Load queen of swords model (appears during Priestess feature) ──
     this.loadQueenModel('/assets/3d/the_queen_of_swords.glb');
+
+    // ── Load death model (always visible, with debug sliders) ──
+    this.loadDeathModel('/assets/3d/death.glb');
 
     // ── Resize handling ──
     window.addEventListener('resize', () => this.onResize());
@@ -368,9 +382,19 @@ export class ThreeBackground {
     if (this.solMixer && this.isSolSwapped) {
       this.solMixer.update(delta * 1.0);
     }
+    // Sol float up/down animation
+    if (this.solModel?.visible) {
+      this.solAnimTime += delta;
+      const floatOffset = Math.sin(this.solAnimTime * 0.8) * 0.3;
+      this.solModel.position.y = this.solBaseY + floatOffset;
+    }
     // Queen of Swords mixer — tick whenever the model is visible
     if (this.queenMixer && this.queenModel?.visible) {
       this.queenMixer.update(delta * 1.0);
+    }
+    // Death model mixer — tick only during Death feature (slow, dramatic pace)
+    if (this.deathMixer && this.isDeathSwapped) {
+      this.deathMixer.update(delta * 0.15);
     }
 
     // Rotate FOND mesh around Z axis
@@ -738,7 +762,7 @@ export class ThreeBackground {
         // Apply the engraved shader
         this.applyEngravedShader(model);
 
-        // Darken sol materials slightly to prevent white bloom
+        // Balance sol materials — lift dark reds but keep bottom from blooming
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
@@ -892,6 +916,106 @@ export class ThreeBackground {
       }
     );
   }
+
+  /**
+   * Load the death.glb model — always visible with debug slider panel for adjustments.
+   */
+  private loadDeathModel(path: string): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // Log all meshes
+        model.traverse((child: THREE.Object3D) => {
+          if ((child as THREE.Mesh).isMesh) {
+            console.log(`📦 Death mesh: "${child.name}"`);
+          }
+        });
+
+        // Apply the engraved shader with alpha preservation
+        this.applyEngravedShaderPreserveAlpha(model);
+
+        // Darken materials slightly to match scene style
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const mat of mats) {
+              const stdMat = mat as THREE.MeshStandardMaterial;
+              if (stdMat.color) {
+                stdMat.color.multiplyScalar(0.55);
+                stdMat.needsUpdate = true;
+              }
+            }
+          }
+        });
+
+        // Initial transform — hidden by default, shown during Death feature
+        model.position.set(-15.0, -6.0, 5.0);
+        model.rotation.set(0.00, 0.49, 0.00);
+        model.scale.setScalar(1.0);
+        model.visible = false;
+
+        // Hard light to brighten the Death model
+        const deathLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        deathLight.position.set(-15.0, 10.0, 20.0); // Aimed from front-above at the model
+        deathLight.target = model;
+        this.scene.add(deathLight);
+        this.scene.add(deathLight.target);
+
+        // Create organic glow sprite at death model's position for entrance/exit effect
+        const deathGlowTexture = this.generateGlowTexture();
+        const deathGlowMat = new THREE.SpriteMaterial({
+          map: deathGlowTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        });
+        const deathGlowSprite = new THREE.Sprite(deathGlowMat);
+        deathGlowSprite.position.copy(model.position);
+        deathGlowSprite.position.y += 3; // Center glow at roughly the model's visual center
+        deathGlowSprite.scale.setScalar(0.1);
+        deathGlowSprite.visible = false;
+        this.bgGroup.add(deathGlowSprite);
+        this.deathGlow = deathGlowSprite;
+
+        this.bgGroup.add(model);
+        this.deathModel = model;
+
+        // Set up animations if available
+        if (gltf.animations && gltf.animations.length > 0) {
+          this.deathMixer = new THREE.AnimationMixer(model);
+          for (const clip of gltf.animations) {
+            console.log(`🎬 Death clip: "${clip.name}" duration: ${clip.duration.toFixed(2)}s tracks: ${clip.tracks.length}`);
+            // Only loop the first 1 second of the animation
+            const subClip = THREE.AnimationUtils.subclip(clip, clip.name + '_sub', 0, 30, 30);
+            const action = this.deathMixer.clipAction(subClip);
+            action.setLoop(THREE.LoopPingPong, Infinity);
+            action.play();
+          }
+          console.log(`🎬 Death: ${gltf.animations.length} animation(s)`);
+        }
+
+        // Pre-compile to avoid first-frame glitches
+        model.visible = true;
+        this.renderer.compile(this.scene, this.camera);
+        this.renderer.render(this.scene, this.camera);
+        model.visible = false;
+        this.deathReady = true;
+
+        console.log(`✅ Death model loaded & pre-compiled: ${path}`);
+      },
+      undefined,
+      (error) => {
+        console.error('❌ Failed to load Death model:', error);
+      }
+    );
+  }
+
 
   /**
    * Bring in queen of swords for the High Priestess feature — scales up.
@@ -1448,6 +1572,143 @@ export class ThreeBackground {
           model.visible = false;
           this.isSolSwapped = false;
           console.log('☀️ Sol dissolved into glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Bring in the death model for the Death feature — glow entrance.
+   */
+  swapToDeath(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.isDeathSwapped && this.deathModel) {
+        resolve();
+        return;
+      }
+
+      if (!this.deathReady || !this.deathModel) {
+        console.warn('⏳ Death model not ready yet, waiting...');
+        const checkInterval = setInterval(() => {
+          if (this.deathReady && this.deathModel) {
+            clearInterval(checkInterval);
+            this.animateDeathEntrance().then(resolve);
+          }
+        }, 100);
+        return;
+      }
+
+      this.animateDeathEntrance().then(resolve);
+    });
+  }
+
+  /**
+   * Animate death entrance: glow builds up, model pops in fully opaque behind glow,
+   * then glow fades to reveal the solid model. Matches Sol entrance style.
+   */
+  private animateDeathEntrance(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.deathModel || !this.deathGlow) { resolve(); return; }
+
+      const model = this.deathModel;
+      const glow = this.deathGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(0.1);
+      glowMat.opacity = 0;
+      model.visible = false;
+      this.isDeathSwapped = true;
+
+      const duration = 1800;
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.35) {
+          const p = t / 0.35;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(0.1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (!model.visible) {
+            model.visible = true;
+          }
+          const p = (t - 0.35) / 0.65;
+          const eased = p * p * p;
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.6));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = true;
+          console.log('💀 Death materialized from glow');
+          resolve();
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+  }
+
+  /**
+   * Animate death exit: glow expands over the model, model hides behind glow,
+   * then glow fades away. Matches Sol exit style.
+   */
+  restoreDeath(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.isDeathSwapped || !this.deathModel || !this.deathGlow) {
+        resolve();
+        return;
+      }
+
+      const model = this.deathModel;
+      const glow = this.deathGlow;
+      const glowMat = glow.material as THREE.SpriteMaterial;
+
+      glow.visible = true;
+      glow.scale.setScalar(1);
+      glowMat.opacity = 0;
+
+      const duration = 900;
+      const startTime = performance.now();
+      const maxGlowScale = 10;
+
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+
+        if (t < 0.4) {
+          const p = t / 0.4;
+          const eased = p * p;
+          glow.scale.setScalar(1 + maxGlowScale * eased);
+          glowMat.opacity = eased * 0.95;
+        } else {
+          if (model.visible) {
+            model.visible = false;
+          }
+          const p = (t - 0.4) / 0.6;
+          const eased = 1 - Math.pow(1 - p, 2);
+          glow.scale.setScalar(maxGlowScale * (1 - eased * 0.85));
+          glowMat.opacity = 0.95 * (1 - eased);
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          glow.visible = false;
+          glowMat.opacity = 0;
+          model.visible = false;
+          this.isDeathSwapped = false;
+          console.log('💀 Death dissolved into glow');
           resolve();
         }
       };

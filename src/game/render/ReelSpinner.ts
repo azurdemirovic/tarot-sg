@@ -8,8 +8,8 @@ export class ReelSpinner extends Container {
   private scrollOffset: number = 0;
   private targetOffset: number = 0;
   private velocity: number = 60; // Fast!
-  private readonly cellSize: number;
-  private readonly rows: number;
+  private cellSize: number;
+  private rows: number;
   private finalSymbols: string[] = [];
   private isTarotColumn: boolean = false;
   private cardbackId: string | null = null;       // cardback texture ID shown during spin
@@ -21,10 +21,10 @@ export class ReelSpinner extends Container {
   private bounceVelocity: number = 0;
   private bounceTime: number = 0;
 
-  private readonly padding: number;
-  private readonly step: number; // cellSize + padding
+  private padding: number;
+  private step: number; // cellSize + padding
   private maskGraphic: Graphics;
-  private readonly maskHeight: number;
+  private maskHeight: number;
 
   constructor(
     private assetLoader: AssetLoader,
@@ -272,4 +272,35 @@ export class ReelSpinner extends Container {
   getActualTarotId(): string | null {
     return this.actualTarotId;
   }
+
+  /**
+   * Resize this reel spinner to a new cell size, rows, and padding.
+   * Rebuilds the mask and re-renders current symbols at the new size.
+   */
+  resizeCells(newCellSize: number, newRows: number, newPadding: number): void {
+    this.cellSize = newCellSize;
+    this.rows = newRows;
+    this.padding = newPadding;
+    this.step = newCellSize + newPadding;
+    this.maskHeight = newRows * newCellSize + (newRows - 1) * newPadding;
+
+    // Rebuild mask
+    this.maskGraphic.clear();
+    this.maskGraphic.rect(0, 0, this.cellSize, this.maskHeight);
+    this.maskGraphic.fill({ color: 0xffffff });
+
+    // Re-render current symbols if we have any
+    if (this.finalSymbols.length > 0) {
+      this.rebuildStrip(this.finalSymbols);
+      this.scrollOffset = 0;
+      this.bounceOffset = 0;
+      this.updateStripPositions();
+    }
+  }
+
+  /** Get the current cell size */
+  getCellSize(): number { return this.cellSize; }
+
+  /** Get the current row count */
+  getRowCount(): number { return this.rows; }
 }

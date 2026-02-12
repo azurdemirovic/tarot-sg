@@ -12,6 +12,9 @@ export class GridView extends Container {
   private bgPlaceholder: Graphics | null = null;
   private reelSpinners: ReelSpinner[] = [];
   private isAnimating: boolean = false;
+  private gridLines: Graphics | null = null;
+  /** Container that holds all reel spinners — offset for centering */
+  private reelContainer: Container | null = null;
 
   constructor(
     private assetLoader: AssetLoader,
@@ -82,6 +85,10 @@ export class GridView extends Container {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
     
+    // Store base dimensions
+    this.baseTotalWidth = totalWidth;
+    this.baseTotalHeight = totalHeight;
+
     // Placeholder white bg (replaced once BACKGROUND.jpg loads)
     this.bgPlaceholder = new Graphics();
     this.bgPlaceholder.rect(0, 0, totalWidth, totalHeight);
@@ -89,33 +96,19 @@ export class GridView extends Container {
     this.addChild(this.bgPlaceholder);
 
     // Grid border: outer border + internal grid lines (BEHIND symbols)
-    const gridLines = new Graphics();
-    // Outer border
-    gridLines.rect(0, 0, totalWidth, totalHeight);
-    gridLines.stroke({ color: 0xdddddd, width: 2 });
-    // Vertical internal lines
-    for (let col = 1; col < this.cols; col++) {
-      const x = col * (this.cellSize + this.padding) - this.padding / 2;
-      gridLines.moveTo(x, 0);
-      gridLines.lineTo(x, totalHeight);
-      gridLines.stroke({ color: 0xdddddd, width: 1 });
-    }
-    // Horizontal internal lines
-    for (let row = 1; row < this.rows; row++) {
-      const y = row * (this.cellSize + this.padding) - this.padding / 2;
-      gridLines.moveTo(0, y);
-      gridLines.lineTo(totalWidth, y);
-      gridLines.stroke({ color: 0xdddddd, width: 1 });
-    }
-    // Apply blur filter to soften the lines
-    gridLines.filters = [new BlurFilter({ strength: 1.76 })];
-    this.addChild(gridLines);
+    this.gridLines = new Graphics();
+    this.drawGridLines(this.cols, this.rows, this.cellSize, this.padding, totalWidth, totalHeight);
+    this.addChild(this.gridLines);
+
+    // Create a container for reel spinners (for centering on resize)
+    this.reelContainer = new Container();
+    this.addChild(this.reelContainer);
 
     // Create reel spinners (ON TOP of grid lines)
     for (let col = 0; col < this.cols; col++) {
       const reelSpinner = new ReelSpinner(this.assetLoader, this.cellSize, this.rows, this.padding);
       reelSpinner.position.set(col * (this.cellSize + this.padding), 0);
-      this.addChild(reelSpinner);
+      this.reelContainer.addChild(reelSpinner);
       this.reelSpinners.push(reelSpinner);
       
       this.sprites[col] = [];
@@ -123,6 +116,41 @@ export class GridView extends Container {
         this.sprites[col][row] = new Sprite();
       }
     }
+  }
+
+  /**
+   * Draw grid lines (outer border + internal lines) onto this.gridLines.
+   */
+  private drawGridLines(
+    cols: number, rows: number, cellSize: number, padding: number,
+    totalWidth: number, totalHeight: number,
+    offsetX: number = 0, offsetY: number = 0
+  ): void {
+    if (!this.gridLines) return;
+    this.gridLines.clear();
+
+    // Outer border
+    this.gridLines.rect(offsetX, offsetY, totalWidth, totalHeight);
+    this.gridLines.stroke({ color: 0xdddddd, width: 2 });
+
+    // Vertical internal lines
+    for (let col = 1; col < cols; col++) {
+      const x = offsetX + col * (cellSize + padding) - padding / 2;
+      this.gridLines.moveTo(x, offsetY);
+      this.gridLines.lineTo(x, offsetY + totalHeight);
+      this.gridLines.stroke({ color: 0xdddddd, width: 1 });
+    }
+
+    // Horizontal internal lines
+    for (let row = 1; row < rows; row++) {
+      const y = offsetY + row * (cellSize + padding) - padding / 2;
+      this.gridLines.moveTo(offsetX, y);
+      this.gridLines.lineTo(offsetX + totalWidth, y);
+      this.gridLines.stroke({ color: 0xdddddd, width: 1 });
+    }
+
+    // Apply blur filter to soften the lines
+    this.gridLines.filters = [new BlurFilter({ strength: 1.76 })];
   }
 
   private pendingStopTimers: ReturnType<typeof setTimeout>[] = [];
@@ -401,6 +429,136 @@ export class GridView extends Container {
   getPadding(): number { return this.padding; }
   getCols(): number { return this.cols; }
   getRows(): number { return this.rows; }
+  /** Get the centering offset of the reel container (0,0 at base size) */
+  getReelContainerOffset(): { x: number; y: number } {
+    return {
+      x: this.reelContainer ? this.reelContainer.x : 0,
+      y: this.reelContainer ? this.reelContainer.y : 0,
+    };
+  }
+
+  /** Total pixel width of the base grid (fixed, doesn't change on resize) */
+  private baseTotalWidth: number = 0;
+  /** Total pixel height of the base grid (fixed, doesn't change on resize) */
+  private baseTotalHeight: number = 0;
+
+  /**
+   * Resize the grid to fit `newCols × newRows` within the same pixel area.
+   * Shrinks cell sizes and repositions/creates/removes reel spinners as needed.
+   * Centers the smaller grid within the base area and redraws grid lines.
+   * Called by Death feature when the grid expands.
+   */
+  resizeGrid(newCols: number, newRows: number): void {
+    // Calculate new cell size and padding to fit within the same base area
+    // Keep padding proportional: padding = cellSize * (10/156) ≈ 6.4%
+    const paddingRatio = 10 / 156;
+    // totalWidth = newCols * cellSize + (newCols - 1) * cellSize * paddingRatio
+    // totalWidth = cellSize * (newCols + (newCols - 1) * paddingRatio)
+    const cellSizeFromWidth = this.baseTotalWidth / (newCols + (newCols - 1) * paddingRatio);
+    const cellSizeFromHeight = this.baseTotalHeight / (newRows + (newRows - 1) * paddingRatio);
+    const newCellSize = Math.floor(Math.min(cellSizeFromWidth, cellSizeFromHeight));
+    const newPadding = Math.max(2, Math.floor(newCellSize * paddingRatio));
+
+    this.cellSize = newCellSize;
+    this.padding = newPadding;
+
+    // Compute actual grid dimensions and centering offsets
+    const actualWidth = newCols * (newCellSize + newPadding) - newPadding;
+    const actualHeight = newRows * (newCellSize + newPadding) - newPadding;
+    const offsetX = Math.floor((this.baseTotalWidth - actualWidth) / 2);
+    const offsetY = Math.floor((this.baseTotalHeight - actualHeight) / 2);
+
+    // Remove extra reel spinners if shrinking
+    while (this.reelSpinners.length > newCols) {
+      const reel = this.reelSpinners.pop()!;
+      if (this.reelContainer) {
+        this.reelContainer.removeChild(reel);
+      }
+      reel.destroy({ children: true });
+    }
+
+    // Resize existing reel spinners and reposition within container
+    for (let col = 0; col < this.reelSpinners.length; col++) {
+      this.reelSpinners[col].resizeCells(newCellSize, newRows, newPadding);
+      this.reelSpinners[col].position.set(col * (newCellSize + newPadding), 0);
+    }
+
+    // Add new reel spinners if expanding
+    while (this.reelSpinners.length < newCols) {
+      const col = this.reelSpinners.length;
+      const reelSpinner = new ReelSpinner(this.assetLoader, newCellSize, newRows, newPadding);
+      reelSpinner.position.set(col * (newCellSize + newPadding), 0);
+      if (this.reelContainer) {
+        this.reelContainer.addChild(reelSpinner);
+      } else {
+        this.addChild(reelSpinner);
+      }
+      this.reelSpinners.push(reelSpinner);
+
+      this.sprites[col] = [];
+      for (let row = 0; row < newRows; row++) {
+        this.sprites[col][row] = new Sprite();
+      }
+    }
+
+    // Center the reel container within the base area
+    if (this.reelContainer) {
+      this.reelContainer.position.set(offsetX, offsetY);
+    }
+
+    // Redraw grid lines to match new cell sizes and positions
+    this.drawGridLines(newCols, newRows, newCellSize, newPadding, actualWidth, actualHeight, offsetX, offsetY);
+
+    this.cols = newCols;
+    this.rows = newRows;
+
+    console.log(`🔄 Grid resized to ${newCols}×${newRows}, cellSize=${newCellSize}, padding=${newPadding}, offset=(${offsetX},${offsetY})`);
+  }
+
+  /**
+   * Restore grid to the default 5×3 layout.
+   * Called when Death feature ends.
+   */
+  restoreDefaultGrid(): void {
+    // Use exact original values
+    const origCellSize = 156;
+    const origPadding = 10;
+    const origCols = 5;
+    const origRows = 3;
+
+    this.cellSize = origCellSize;
+    this.padding = origPadding;
+
+    // Remove extra reel spinners if we have more than 5
+    while (this.reelSpinners.length > origCols) {
+      const reel = this.reelSpinners.pop()!;
+      if (this.reelContainer) {
+        this.reelContainer.removeChild(reel);
+      }
+      reel.destroy({ children: true });
+    }
+
+    // Resize and reposition existing spinners
+    for (let col = 0; col < this.reelSpinners.length; col++) {
+      this.reelSpinners[col].resizeCells(origCellSize, origRows, origPadding);
+      this.reelSpinners[col].position.set(col * (origCellSize + origPadding), 0);
+    }
+
+    // Reset reel container to origin (no centering offset)
+    if (this.reelContainer) {
+      this.reelContainer.position.set(0, 0);
+    }
+
+    // Redraw grid lines at original dimensions
+    const totalWidth = origCols * (origCellSize + origPadding) - origPadding;
+    const totalHeight = origRows * (origCellSize + origPadding) - origPadding;
+    this.drawGridLines(origCols, origRows, origCellSize, origPadding, totalWidth, totalHeight, 0, 0);
+
+    this.cols = origCols;
+    this.rows = origRows;
+
+    console.log('🔄 Grid restored to default 5×3');
+  }
 
   /**
    * Clear all sprites

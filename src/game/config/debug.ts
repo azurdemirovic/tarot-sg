@@ -13,7 +13,7 @@ export const DEBUG = {
   BG_ANIMATE_CAMERA: true,
 
   /** Force Cups feature on next spin (for testing) */
-  FORCE_CUPS: false,
+  FORCE_CUPS: true,
 
   /** Columns to place Cups cards (2 or 3 columns) */
   CUPS_COLUMNS: [1, 3],
@@ -25,8 +25,14 @@ export const DEBUG = {
   LOVERS_COLUMNS: [1, 3],
 
   /** Force Priestess feature on next spin (for testing) */
-  FORCE_PRIESTESS: true,
+  FORCE_PRIESTESS: false,
 
   /** Columns to place Priestess cards (2 or 3 columns) */
   PRIESTESS_COLUMNS: [1, 3],
+
+  /** Force Death feature on next spin (for testing) */
+  FORCE_DEATH: false,
+
+  /** Columns to place Death cards (2 or 3 columns) */
+  DEATH_COLUMNS: [1, 3],
 };
