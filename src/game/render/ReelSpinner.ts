@@ -144,6 +144,12 @@ export class ReelSpinner extends Container {
   requestStop(delay: number = 0, intensity: number = 0.8): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(() => {
+        // Only stop if still actively scrolling — avoid re-triggering bounce/sound
+        if (!this.isSpinning) {
+          resolve();
+          return;
+        }
+
         // Instant stop + bounce
         this.scrollOffset = this.targetOffset;
         this.isSpinning = false;
@@ -240,6 +246,19 @@ export class ReelSpinner extends Container {
     
     symbolIds.forEach((symbolId, index) => {
       const sprite = new Sprite();
+
+      // 'EMPTY' cells render as invisible (used for sticky WILD positions in Death feature)
+      if (symbolId === 'EMPTY') {
+        sprite.anchor.set(0.5);
+        sprite.x = this.cellSize / 2;
+        sprite.width = this.cellSize - 20;
+        sprite.height = this.cellSize - 20;
+        sprite.alpha = 0;
+        this.symbolContainer.addChild(sprite);
+        this.strip.push(sprite);
+        return;
+      }
+
       const texture = this.assetLoader.getTexture(symbolId);
       if (texture) sprite.texture = texture;
       

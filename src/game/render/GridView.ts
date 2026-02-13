@@ -425,6 +425,11 @@ export class GridView extends Container {
     }
   }
 
+  /** Returns true if any reel is still actively scrolling (not just bouncing) */
+  hasScrollingReels(): boolean {
+    return this.reelSpinners.some(reel => reel.isStillScrolling());
+  }
+
   // ── Accessors for FoolRevealAnimation ──
   getReelSpinners(): ReelSpinner[] { return this.reelSpinners; }
   getCellSize(): number { return this.cellSize; }

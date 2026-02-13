@@ -487,219 +487,128 @@ export class TarotFeatureProcessor {
   }
 
   /**
-   * Find all clusters of adjacent matching symbols.
-   * Adjacency: horizontal, vertical, AND diagonal (8-connected).
-   * WILD symbols count as matching ANY symbol — they can seed clusters
-   * and join any adjacent cluster. A group of pure WILDs also forms a cluster.
+   * Find all clusters of adjacent same-symbol groups.
+   * Adjacency: horizontal and vertical only (4-connected — no diagonals).
+   *
+   * Each cluster consists of one specific symbol type (e.g. RING) plus any
+   * adjacent WILD cells. WILDs act as that symbol for the cluster but do NOT
+   * bridge different symbol types together. A WILD can belong to multiple
+   * clusters (e.g. a WILD between RINGs and COINs counts for both).
+   *
    * Minimum cluster size scales with expansion: 3 → 4 → 5 → 6.
    */
   private findClusters(grid: Grid, cols: number, rows: number, minSize: number): DeathCluster[] {
-    const visited = new Set<string>();
     const clusters: DeathCluster[] = [];
 
     const key = (c: number, r: number) => `${c},${r}`;
     const directions = [
-      [-1, -1], [-1, 0], [-1, 1],
-      [0, -1],           [0, 1],
-      [1, -1],  [1, 0],  [1, 1],
+              [-1, 0],
+      [0, -1],         [0, 1],
+              [1, 0],
     ];
 
+    // Collect all unique non-WILD, non-tarot symbol types on the grid
+    const symbolTypes = new Set<string>();
     for (let c = 0; c < cols; c++) {
       for (let r = 0; r < rows; r++) {
-        const k = key(c, r);
-        if (visited.has(k)) continue;
         if (!grid[c] || !grid[c][r]) continue;
+        const sid = grid[c][r].symbolId;
+        if (sid !== 'WILD' && sid !== 'EMPTY' && !sid.startsWith('T_')) {
+          symbolTypes.add(sid);
+        }
+      }
+    }
 
-        const symbolId = grid[c][r].symbolId;
-        // Skip tarots for clustering
-        if (symbolId.startsWith('T_')) continue;
+    // For each symbol type, find connected groups of that symbol + adjacent WILDs
+    for (const targetSymbol of symbolTypes) {
+      const visited = new Set<string>();
 
-        // BFS to find all connected cells.
-        // For non-WILD seeds: match same symbol OR WILD neighbors.
-        // For WILD seeds: match any non-tarot neighbor (WILD matches everything).
-        const clusterCells: { col: number; row: number }[] = [];
-        const queue: { col: number; row: number }[] = [{ col: c, row: r }];
-        visited.add(k);
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          if (!grid[c] || !grid[c][r]) continue;
+          const sid = grid[c][r].symbolId;
+          // Only seed from the target symbol (not from WILDs — WILDs get pulled in)
+          if (sid !== targetSymbol) continue;
 
-        // Track the "dominant" symbol of the cluster (first non-WILD, or WILD if all WILDs)
-        let dominantSymbol = symbolId;
+          const k = key(c, r);
+          if (visited.has(k)) continue;
 
-        while (queue.length > 0) {
-          const cell = queue.shift()!;
-          clusterCells.push(cell);
+          // BFS: expand to same symbol or WILD neighbors
+          const clusterCells: { col: number; row: number }[] = [];
+          const queue: { col: number; row: number }[] = [{ col: c, row: r }];
+          visited.add(k);
 
-          const cellSymbol = grid[cell.col][cell.row].symbolId;
+          while (queue.length > 0) {
+            const cell = queue.shift()!;
+            clusterCells.push(cell);
 
-          // If this cell is non-WILD, adopt it as the dominant symbol
-          if (cellSymbol !== 'WILD' && dominantSymbol === 'WILD') {
-            dominantSymbol = cellSymbol;
-          }
+            for (const [dc, dr] of directions) {
+              const nc = cell.col + dc;
+              const nr = cell.row + dr;
+              if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+              const nk = key(nc, nr);
+              if (visited.has(nk)) continue;
+              if (!grid[nc] || !grid[nc][nr]) continue;
+              const neighborId = grid[nc][nr].symbolId;
 
-          for (const [dc, dr] of directions) {
-            const nc = cell.col + dc;
-            const nr = cell.row + dr;
-            if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
-            const nk = key(nc, nr);
-            if (visited.has(nk)) continue;
-            if (!grid[nc] || !grid[nc][nr]) continue;
-            const neighborId = grid[nc][nr].symbolId;
-            if (neighborId.startsWith('T_')) continue;
-
-            // WILD matches everything; non-WILD cells match same symbol or WILD
-            const matches =
-              neighborId === 'WILD' ||
-              cellSymbol === 'WILD' ||
-              neighborId === dominantSymbol ||
-              (dominantSymbol === 'WILD'); // pure WILD cluster absorbs anything
-
-            if (matches) {
-              visited.add(nk);
-              queue.push({ col: nc, row: nr });
-
-              // Update dominant if we found a non-WILD in what was a pure WILD cluster
-              if (neighborId !== 'WILD' && dominantSymbol === 'WILD') {
-                dominantSymbol = neighborId;
+              // Match same symbol or WILD (WILDs join the cluster but don't bridge)
+              if (neighborId === targetSymbol || neighborId === 'WILD') {
+                visited.add(nk);
+                queue.push({ col: nc, row: nr });
               }
             }
           }
-        }
 
-        // Only keep clusters that meet the minimum size
-        if (clusterCells.length >= minSize) {
-          clusters.push({ symbolId: dominantSymbol, cells: clusterCells });
+          // Only keep clusters that meet the minimum size
+          if (clusterCells.length >= minSize) {
+            clusters.push({ symbolId: targetSymbol, cells: clusterCells });
+          }
+        }
+      }
+    }
+
+    // Also find pure WILD-only clusters (3+ connected WILDs not already part of other clusters)
+    {
+      const visited = new Set<string>();
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          if (!grid[c] || !grid[c][r]) continue;
+          if (grid[c][r].symbolId !== 'WILD') continue;
+
+          const k = key(c, r);
+          if (visited.has(k)) continue;
+
+          // BFS: expand to WILD neighbors only
+          const clusterCells: { col: number; row: number }[] = [];
+          const queue: { col: number; row: number }[] = [{ col: c, row: r }];
+          visited.add(k);
+
+          while (queue.length > 0) {
+            const cell = queue.shift()!;
+            clusterCells.push(cell);
+
+            for (const [dc, dr] of directions) {
+              const nc = cell.col + dc;
+              const nr = cell.row + dr;
+              if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+              const nk = key(nc, nr);
+              if (visited.has(nk)) continue;
+              if (!grid[nc] || !grid[nc][nr]) continue;
+              if (grid[nc][nr].symbolId !== 'WILD') continue;
+
+              visited.add(nk);
+              queue.push({ col: nc, row: nr });
+            }
+          }
+
+          if (clusterCells.length >= minSize) {
+            clusters.push({ symbolId: 'WILD', cells: clusterCells });
+          }
         }
       }
     }
 
     return clusters;
-  }
-
-  /**
-   * Select the best cluster to slash according to priority:
-   * 1. Largest cluster size
-   * 2. Higher-paying symbol type
-   * 3. Leftmost position
-   * 4. Topmost position
-   */
-  private selectBestCluster(clusters: DeathCluster[]): DeathCluster | null {
-    if (clusters.length === 0) return null;
-
-    const getSymbolPayValue = (symbolId: string): number => {
-      const sym = this.assetLoader.getSymbol(symbolId);
-      return sym ? (sym.payValues[4] || sym.payValues[3] || 0) : 0;
-    };
-
-    clusters.sort((a, b) => {
-      // 1. Largest cluster
-      if (b.cells.length !== a.cells.length) return b.cells.length - a.cells.length;
-      // 2. Higher paying symbol
-      const payA = getSymbolPayValue(a.symbolId);
-      const payB = getSymbolPayValue(b.symbolId);
-      if (payB !== payA) return payB - payA;
-      // 3. Leftmost
-      const minColA = Math.min(...a.cells.map(c => c.col));
-      const minColB = Math.min(...b.cells.map(c => c.col));
-      if (minColA !== minColB) return minColA - minColB;
-      // 4. Topmost
-      const minRowA = Math.min(...a.cells.map(c => c.row));
-      const minRowB = Math.min(...b.cells.map(c => c.row));
-      return minRowA - minRowB;
-    });
-
-    return clusters[0];
-  }
-
-  /**
-   * Select a slash line within a cluster:
-   * 1. Longest horizontal run of ≥2
-   * 2. Else longest vertical run
-   * 3. Else longest diagonal run
-   * 4. Else any valid 2+ symbols in cluster
-   */
-  private selectSlashLine(cluster: DeathCluster): { col: number; row: number }[] {
-    // Helper: find longest consecutive run in a direction
-    const findRuns = (
-      sortFn: (a: { col: number; row: number }, b: { col: number; row: number }) => number,
-      groupKey: (c: { col: number; row: number }) => string,
-      nextKey: (c: { col: number; row: number }) => string
-    ): { col: number; row: number }[] => {
-      const sorted = [...cluster.cells].sort(sortFn);
-      const groups = new Map<string, { col: number; row: number }[]>();
-      for (const cell of sorted) {
-        const gk = groupKey(cell);
-        if (!groups.has(gk)) groups.set(gk, []);
-        groups.get(gk)!.push(cell);
-      }
-
-      let bestRun: { col: number; row: number }[] = [];
-      for (const [, cells] of groups) {
-        let currentRun: { col: number; row: number }[] = [cells[0]];
-        for (let i = 1; i < cells.length; i++) {
-          if (nextKey(cells[i]) === nextKey(cells[i - 1])) {
-            // Same position in the varying axis — skip
-            continue;
-          }
-          const prevNk = nextKey(cells[i - 1]);
-          const currNk = nextKey(cells[i]);
-          if (parseInt(currNk) - parseInt(prevNk) === 1) {
-            currentRun.push(cells[i]);
-          } else {
-            if (currentRun.length >= 2 && currentRun.length > bestRun.length) {
-              bestRun = [...currentRun];
-            }
-            currentRun = [cells[i]];
-          }
-        }
-        if (currentRun.length >= 2 && currentRun.length > bestRun.length) {
-          bestRun = [...currentRun];
-        }
-      }
-      return bestRun;
-    };
-
-    // 1. Horizontal runs (same row, consecutive cols)
-    const hRun = findRuns(
-      (a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col,
-      c => `${c.row}`,
-      c => `${c.col}`
-    );
-    if (hRun.length >= 2) return hRun;
-
-    // 2. Vertical runs (same col, consecutive rows)
-    const vRun = findRuns(
-      (a, b) => a.col !== b.col ? a.col - b.col : a.row - b.row,
-      c => `${c.col}`,
-      c => `${c.row}`
-    );
-    if (vRun.length >= 2) return vRun;
-
-    // 3. Diagonal runs — check both directions
-    // Diagonal ↘: same (col - row), sorted by col
-    const diagA = findRuns(
-      (a, b) => {
-        const da = a.col - a.row;
-        const db = b.col - b.row;
-        return da !== db ? da - db : a.col - b.col;
-      },
-      c => `${c.col - c.row}`,
-      c => `${c.col}`
-    );
-    if (diagA.length >= 2) return diagA;
-
-    // Diagonal ↗: same (col + row), sorted by col
-    const diagB = findRuns(
-      (a, b) => {
-        const da = a.col + a.row;
-        const db = b.col + b.row;
-        return da !== db ? da - db : a.col - b.col;
-      },
-      c => `${c.col + c.row}`,
-      c => `${c.col}`
-    );
-    if (diagB.length >= 2) return diagB;
-
-    // 4. Fallback: take any 2 cells from the cluster
-    return cluster.cells.slice(0, Math.min(2, cluster.cells.length));
   }
 
   /**
@@ -757,55 +666,36 @@ export class TarotFeatureProcessor {
     const cols = deathResult.gridCols;
     const rows = deathResult.gridRows;
 
-    // Min cluster size scales with expansion: 3, 4, 5, 6
-    const minClusterSize = 3 + deathResult.currentExpansion;
+    // Convert any 'EMPTY' cells (sticky WILD placeholders) back to 'WILD' for logic
+    for (const wild of deathResult.stickyWilds) {
+      if (wild.col < cols && wild.row < rows && grid[wild.col] && grid[wild.col][wild.row]) {
+        if (grid[wild.col][wild.row].symbolId === 'EMPTY') {
+          grid[wild.col][wild.row].symbolId = 'WILD';
+        }
+      }
+    }
+
+    // Minimum cluster size is always 3
+    const minClusterSize = 3;
 
     // 1. Find clusters meeting the minimum size requirement
     const clusters = this.findClusters(grid, cols, rows, minClusterSize);
 
-    // 2. Perform 1-3 slashes
-    const slashCount = Math.min(
-      clusters.length > 0 ? this.rng.nextInt(1, Math.min(3, clusters.length)) : 0,
-      3
-    );
-
+    // 2. Slash ALL clusters — every cell in every cluster gets slashed
     const slashes: DeathSlash[] = [];
     const allSlashedCells: { col: number; row: number }[] = [];
     const slashedSet = new Set<string>();
 
-    // Copy clusters so we can modify them as we slash
-    let remainingClusters = clusters.map(c => ({
-      symbolId: c.symbolId,
-      cells: [...c.cells],
-    }));
+    for (const cluster of clusters) {
+      slashes.push({ cells: [...cluster.cells], symbolId: cluster.symbolId });
 
-    for (let s = 0; s < slashCount; s++) {
-      // Re-sort and pick best remaining cluster
-      const best = this.selectBestCluster(
-        remainingClusters.filter(c => c.cells.length >= minClusterSize)
-      );
-      if (!best) break;
-
-      // Select slash line within cluster
-      const slashCells = this.selectSlashLine(best);
-
-      slashes.push({ cells: slashCells, symbolId: best.symbolId });
-
-      for (const cell of slashCells) {
+      for (const cell of cluster.cells) {
         const k = `${cell.col},${cell.row}`;
         if (!slashedSet.has(k)) {
           slashedSet.add(k);
           allSlashedCells.push(cell);
         }
       }
-
-      // Remove slashed cells from the cluster for subsequent slashes
-      const slashedKeys = new Set(slashCells.map(c => `${c.col},${c.row}`));
-      best.cells = best.cells.filter(c => !slashedKeys.has(`${c.col},${c.row}`));
-      remainingClusters = remainingClusters.map(c => ({
-        symbolId: c.symbolId,
-        cells: c.cells.filter(cell => !slashedKeys.has(`${cell.col},${cell.row}`)),
-      })).filter(c => c.cells.length >= minClusterSize);
     }
 
     // 3. Calculate cluster-based payouts for each slash

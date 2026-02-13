@@ -79,7 +79,7 @@ export class DeathRevealAnimation {
 
   /** Request hurry-up for the current reel spin animation. */
   requestHurryUp(): void {
-    if (this.reelSpinActive) {
+    if (this.reelSpinActive && this.gridView.hasScrollingReels()) {
       this.hurryUpRequested = true;
       this.gridView.hurryUp();
     }
@@ -164,9 +164,24 @@ export class DeathRevealAnimation {
           this.clearStickyWildOverlays();
         }
 
-        // B6: Animate refill (new sticky WILDs get a special glow)
-        if (spinResult.refillCells.length > 0) {
-          await this.phaseRefillAnimation(spinResult);
+        // B6: Clear static WILD overlays and update grid to show new sticky WILDs only
+        this.clearStickySprites();
+
+        // Update grid so sticky WILDs are visible (EMPTY→WILD in logic).
+        // Non-wild refill cells don't need visual refill — next spin scrolls them away.
+        for (let col = 0; col < this.cols; col++) {
+          if (!spinResult.transformedGrid[col]) continue;
+          const symbolIds = spinResult.transformedGrid[col].map(cell => cell.symbolId);
+          this.reelSpinners[col].setSymbols(symbolIds, false);
+        }
+
+        // Instantly reveal new sticky WILDs (flash them in, no slow refill)
+        if (spinResult.newStickyWilds.length > 0) {
+          for (const cell of spinResult.newStickyWilds) {
+            const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
+            const sprite = sprites?.[cell.row];
+            if (sprite) sprite.alpha = 1;
+          }
         }
 
         // B6.5: Update sticky WILD overlays with current state
@@ -239,8 +254,7 @@ export class DeathRevealAnimation {
           );
         }
 
-        // Pause before next spin (slower transitions)
-        await wait(800);
+        // No pause — immediately start next spin
       }
 
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
@@ -324,8 +338,8 @@ export class DeathRevealAnimation {
     this.reelSpinActive = false;
     this.hurryUpRequested = false;
 
-    // Remove the static overlays now that the grid has landed
-    this.clearStickySprites();
+    // Keep the static WILD overlays in place — underlying cells are EMPTY (invisible).
+    // They will be cleared later when the grid is updated after slash/refill.
   }
 
   private clearStickySprites(): void {
@@ -345,214 +359,63 @@ export class DeathRevealAnimation {
     // Intentionally empty — slash trail handles the visual
   }
 
-  // ── Slash animation (glowy red trail effect) ──
+  // ── Slash animation (all clusters slashed simultaneously with red flash) ──
   private async phaseSlashAnimation(spinResult: DeathSpinResult): Promise<void> {
     const step = this.cellSize + this.padding;
     const offset = this.getOffset();
-    const halfCell = this.cellSize / 2;
 
-    // Animate each slash as a glowing red trail from first to last cell
-    for (const slash of spinResult.slashes) {
-      if (slash.cells.length === 0) continue;
+    if (spinResult.slashedCells.length === 0) return;
 
-      this.playSfx(this.deathSlashBuffer, 0.5);
+    this.playSfx(this.deathSlashBuffer, 0.5);
 
-      // Build waypoints: center of each cell in order
-      const points = slash.cells.map(cell => ({
-        x: offset.x + cell.col * step + halfCell,
-        y: offset.y + cell.row * step + halfCell,
-      }));
+    // Create glow overlays on all slashed cells simultaneously
+    const cellOverlays: Graphics[] = [];
+    for (const cell of spinResult.slashedCells) {
+      const g = new Graphics();
+      const x = offset.x + cell.col * step;
+      const y = offset.y + cell.row * step;
 
-      // Calculate total path length for even speed
-      let totalLength = 0;
-      const segments: number[] = [0];
-      for (let i = 1; i < points.length; i++) {
-        const dx = points[i].x - points[i - 1].x;
-        const dy = points[i].y - points[i - 1].y;
-        totalLength += Math.sqrt(dx * dx + dy * dy);
-        segments.push(totalLength);
+      // Dark crimson glow behind the cell
+      g.roundRect(x - 4, y - 4, this.cellSize + 8, this.cellSize + 8, 6);
+      g.fill({ color: 0x880000, alpha: 0.6 });
+      // Inner bright red
+      g.roundRect(x, y, this.cellSize, this.cellSize, 4);
+      g.fill({ color: 0xcc1100, alpha: 0.4 });
+
+      this.parent.addChild(g);
+      cellOverlays.push(g);
+    }
+
+    // Phase 1: Flash in — cells pulse red
+    const flashDuration = 200;
+    await tween(flashDuration, (t) => {
+      const flicker = 0.8 + 0.2 * Math.sin(t * Math.PI * 3);
+      for (const g of cellOverlays) {
+        g.alpha = t * flicker;
       }
-
-      // Many glow layers for an intense, wide, glowy trail
-      const trailLayers: Graphics[] = [];
-      const layerCount = 10;
-      for (let l = 0; l < layerCount; l++) {
-        const g = new Graphics();
-        this.parent.addChild(g);
-        trailLayers.push(g);
-      }
-
-      // Slash trail animates fast
-      const slashDuration = 180 + slash.cells.length * 35;
-      const trailFadeDuration = 500;
-
-      // Helper: get point at distance along path
-      const getPointAtDist = (dist: number) => {
-        for (let i = 1; i < segments.length; i++) {
-          if (dist <= segments[i]) {
-            const segStart = segments[i - 1];
-            const segLen = segments[i] - segStart;
-            const localT = segLen > 0 ? (dist - segStart) / segLen : 0;
-            return {
-              x: points[i - 1].x + (points[i].x - points[i - 1].x) * localT,
-              y: points[i - 1].y + (points[i].y - points[i - 1].y) * localT,
-            };
-          }
-        }
-        return points[points.length - 1];
-      };
-
-      // Build intermediate path points helper
-      const buildPath = (g: Graphics, tailDist: number, headDist: number) => {
-        const tail = getPointAtDist(tailDist);
-        const head = getPointAtDist(headDist);
-        g.moveTo(tail.x, tail.y);
-        for (let i = 1; i < points.length; i++) {
-          if (segments[i] > tailDist && segments[i] < headDist) {
-            g.lineTo(points[i].x, points[i].y);
-          }
-        }
-        g.lineTo(head.x, head.y);
-      };
-
-      // Phase 1: Trail races through cells — dark demonic slash
-      await tween(slashDuration, (t) => {
-        for (const g of trailLayers) g.clear();
-
-        const headDist = t * totalLength;
-        const trailLength = totalLength * 0.7;
-        const tailDist = Math.max(0, headDist - trailLength);
-        const head = getPointAtDist(headDist);
-
-        // Flicker factor — irregular pulsing for organic, fire-like feel
-        const flicker = 0.85 + 0.15 * Math.sin(t * 47) * Math.cos(t * 31);
-
-        // Layer 0: Wide dark shadow — the slash tears darkness into the scene
-        buildPath(trailLayers[0], tailDist, headDist);
-        trailLayers[0].stroke({ width: 110, color: 0x000000, alpha: 0.15 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 1: Dark crimson outer haze
-        buildPath(trailLayers[1], tailDist, headDist);
-        trailLayers[1].stroke({ width: 80, color: 0x330000, alpha: 0.18 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 2: Deep blood-red smoke
-        buildPath(trailLayers[2], tailDist, headDist);
-        trailLayers[2].stroke({ width: 56, color: 0x550000, alpha: 0.22 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 3: Dark red glow
-        buildPath(trailLayers[3], tailDist, headDist);
-        trailLayers[3].stroke({ width: 38, color: 0x880000, alpha: 0.3 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 4: Crimson fire
-        buildPath(trailLayers[4], tailDist, headDist);
-        trailLayers[4].stroke({ width: 26, color: 0xaa0000, alpha: 0.35 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 5: Hot ember red
-        buildPath(trailLayers[5], tailDist, headDist);
-        trailLayers[5].stroke({ width: 18, color: 0xcc1100, alpha: 0.4 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 6: Bright ember
-        buildPath(trailLayers[6], tailDist, headDist);
-        trailLayers[6].stroke({ width: 10, color: 0xdd2200, alpha: 0.5 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 7: Orange-red fire edge
-        buildPath(trailLayers[7], tailDist, headDist);
-        trailLayers[7].stroke({ width: 5, color: 0xee3300, alpha: 0.55 * flicker, cap: 'round', join: 'round' });
-
-        // Layer 8: Dark core — the wound itself is dark, not bright
-        buildPath(trailLayers[8], tailDist, headDist);
-        trailLayers[8].stroke({ width: 3, color: 0x220000, alpha: 0.7, cap: 'round', join: 'round' });
-
-        // Layer 9: Thin black scar center
-        buildPath(trailLayers[9], tailDist, headDist);
-        trailLayers[9].stroke({ width: 1.5, color: 0x110000, alpha: 0.8, cap: 'round', join: 'round' });
-
-        // Dark ember orb at head — smoldering, not shining
-        trailLayers[9].circle(head.x, head.y, 30);
-        trailLayers[9].fill({ color: 0x000000, alpha: 0.12 * flicker });
-        trailLayers[9].circle(head.x, head.y, 20);
-        trailLayers[9].fill({ color: 0x440000, alpha: 0.2 * flicker });
-        trailLayers[9].circle(head.x, head.y, 12);
-        trailLayers[9].fill({ color: 0x881100, alpha: 0.35 * flicker });
-        trailLayers[9].circle(head.x, head.y, 6);
-        trailLayers[9].fill({ color: 0xcc2200, alpha: 0.5 * flicker });
-        trailLayers[9].circle(head.x, head.y, 2);
-        trailLayers[9].fill({ color: 0xdd3300, alpha: 0.7 });
-      }, easeOutCubic);
-
-      // Dim slashed cell sprites as the trail completes
-      for (const cell of slash.cells) {
+      // Dim the slashed sprites as they get hit
+      for (const cell of spinResult.slashedCells) {
         const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
         const sprite = sprites?.[cell.row];
-        if (sprite) sprite.alpha = 0.3;
+        if (sprite) sprite.alpha = 1 - t * 0.7;
       }
+    }, easeOutCubic);
 
-      // Phase 2: Trail fades out, sprites fade out
-      await tween(trailFadeDuration, (t) => {
-        for (const g of trailLayers) g.alpha = 1 - t;
-        for (const cell of slash.cells) {
-          const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
-          const sprite = sprites?.[cell.row];
-          if (sprite) sprite.alpha = 0.3 * (1 - t);
-        }
-      }, easeOutCubic);
-
-      // Cleanup trail layers
-      for (const g of trailLayers) g.destroy();
-    }
-
-    await wait(100);
-  }
-
-  // ── Refill animation ──
-  private async phaseRefillAnimation(spinResult: DeathSpinResult): Promise<void> {
-    // Use setSymbols to properly update the reel spinners cell-by-cell
-    // First, rebuild the full column symbols from the transformed grid
-    for (let col = 0; col < this.cols; col++) {
-      if (!spinResult.transformedGrid[col]) continue;
-      const symbolIds = spinResult.transformedGrid[col].map(cell => cell.symbolId);
-      this.reelSpinners[col].setSymbols(symbolIds, false);
-    }
-
-    // Now hide the refill cells and animate them appearing
-    for (const cell of spinResult.refillCells) {
-      const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
-      const sprite = sprites?.[cell.row];
-      if (sprite) {
-        sprite.alpha = 0;
+    // Phase 2: Fade out — cells disappear
+    const fadeDuration = 250;
+    await tween(fadeDuration, (t) => {
+      for (const g of cellOverlays) {
+        g.alpha = 1 - t;
       }
-    }
-
-    // Staggered fade-in of new symbols
-    const stagger = 40;
-    const fadePromises: Promise<void>[] = [];
-    for (let i = 0; i < spinResult.refillCells.length; i++) {
-      const cell = spinResult.refillCells[i];
-      const delayMs = i * stagger;
-
-      fadePromises.push(
-        wait(delayMs).then(() => {
-          const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
-          const sprite = sprites?.[cell.row];
-          if (sprite) {
-            return tween(200, (t) => {
-              sprite.alpha = t;
-            }, easeOutCubic);
-          }
-        })
-      );
-    }
-
-    await Promise.all(fadePromises);
-
-    // Ensure all sprites are fully visible
-    for (const cell of spinResult.refillCells) {
-      const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
-      const sprite = sprites?.[cell.row];
-      if (sprite) {
-        sprite.alpha = 1;
+      for (const cell of spinResult.slashedCells) {
+        const sprites = this.reelSpinners[cell.col]?.getVisibleSprites();
+        const sprite = sprites?.[cell.row];
+        if (sprite) sprite.alpha = 0.3 * (1 - t);
       }
-    }
+    }, easeOutCubic);
+
+    // Cleanup overlays
+    for (const g of cellOverlays) g.destroy();
   }
 
   // ── Reap Bar (vertical, left side) ──

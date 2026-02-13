@@ -344,14 +344,16 @@ export class GameController {
   /**
    * Generate a fresh random grid for Death multi-spin (variable size).
    * Sticky WILDs are placed first, then remaining cells are filled randomly.
+   * Sticky WILD positions use 'EMPTY' so no symbol drops behind the overlay;
+   * the visual WILD is rendered by the sticky overlay in DeathRevealAnimation.
    */
   generateDeathGrid(cols: number, rows: number, stickyWilds: { col: number; row: number }[] = []): Grid {
     const { grid } = this.spinGenerator.generateSpin(cols, rows, 0); // 0 tarot chance
 
-    // Overwrite sticky WILD positions — these persist across spins
+    // Mark sticky WILD positions as EMPTY — the overlay sprite handles the visual
     for (const wild of stickyWilds) {
       if (wild.col < cols && wild.row < rows && grid[wild.col]) {
-        grid[wild.col][wild.row] = { col: wild.col, row: wild.row, symbolId: 'WILD' };
+        grid[wild.col][wild.row] = { col: wild.col, row: wild.row, symbolId: 'EMPTY' };
       }
     }
 
