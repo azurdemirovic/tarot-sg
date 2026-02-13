@@ -74,7 +74,9 @@ export class FoolRevealAnimation {
     private cols: number,
     private rows: number,
     private threeBg: ThreeBackground | null = null,
-    private pixiCanvas: HTMLCanvasElement | null = null
+    private pixiCanvas: HTMLCanvasElement | null = null,
+    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void,
+    private symbolGlowBuffer: AudioBuffer | null
   ) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
@@ -234,6 +236,7 @@ export class FoolRevealAnimation {
 
   // ── Spawn dark, diffuse particle-like glow behind a WILD cell ──
   private spawnWildGlow(col: number, row: number, step: number): void {
+    this.playSfx(this.symbolGlowBuffer, 0.4);
     const cx = col * step + this.cellSize / 2;
     const cy = row * step + this.cellSize / 2;
 

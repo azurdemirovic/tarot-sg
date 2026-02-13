@@ -70,7 +70,9 @@ export class DeathRevealAnimation {
     private rows: number,
     private gridView: GridView,
     private threeBg: ThreeBackground | null = null,
-    private pixiCanvas: HTMLCanvasElement | null = null
+    private pixiCanvas: HTMLCanvasElement | null = null,
+    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void,
+    private deathSlashBuffer: AudioBuffer | null,
   ) {
     this.overlayContainer = new Container();
   }
@@ -352,6 +354,8 @@ export class DeathRevealAnimation {
     // Animate each slash as a glowing red trail from first to last cell
     for (const slash of spinResult.slashes) {
       if (slash.cells.length === 0) continue;
+
+      this.playSfx(this.deathSlashBuffer, 0.5);
 
       // Build waypoints: center of each cell in order
       const points = slash.cells.map(cell => ({

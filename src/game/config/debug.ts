@@ -31,7 +31,7 @@ export const DEBUG = {
   PRIESTESS_COLUMNS: [1, 3],
 
   /** Force Death feature on next spin (for testing) */
-  FORCE_DEATH: true,
+  FORCE_DEATH: false,
 
   /** Columns to place Death cards (2 or 3 columns) */
   DEATH_COLUMNS: [1, 3],

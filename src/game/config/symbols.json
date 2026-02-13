@@ -108,7 +108,7 @@
       "id": "T_FOOL",
       "tier": "TAROT",
       "filename": "T_FOOL.jpg",
-      "baseWeight": 10,
+      "baseWeight": 0,
       "payValues": [0, 0, 15, 30, 75],
       "isTarot": true
     },

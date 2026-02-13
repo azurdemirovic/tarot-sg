@@ -77,7 +77,9 @@ export class PriestessRevealAnimation {
     private rows: number,
     private gridView: GridView,
     private threeBg: ThreeBackground | null = null,
-    private pixiCanvas: HTMLCanvasElement | null = null
+    private pixiCanvas: HTMLCanvasElement | null = null,
+    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void,
+    private symbolGlowBuffer: AudioBuffer | null
   ) {
     this.overlayContainer = new Container();
   }
@@ -346,6 +348,7 @@ export class PriestessRevealAnimation {
     this.mysteryOverlays.set(key, cover);
 
     if (animated) {
+      this.playSfx(this.symbolGlowBuffer, 0.4);
       cover.scale.set(0);
       cover.alpha = 0;
       return tween(300, (t) => {

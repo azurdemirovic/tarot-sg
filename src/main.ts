@@ -224,6 +224,8 @@ let modelDespawnBuffer: AudioBuffer | null = null;
 let loversBackgroundBuffer: AudioBuffer | null = null;
 let loversBackgroundSource: AudioBufferSourceNode | null = null;
 let loversBackgroundGain: GainNode | null = null;
+let deathSlashBuffer: AudioBuffer | null = null;
+let symbolGlowBuffer: AudioBuffer | null = null;
 
 async function loadSfxBuffer(url: string): Promise<AudioBuffer | null> {
   try {
@@ -250,6 +252,9 @@ async function preloadSoundEffects(): Promise<void> {
     modelDespawnBuffer = await loadSfxBuffer('/assets/sound/model_despawn.wav');
     // Feature-specific background music
     loversBackgroundBuffer = await loadSfxBuffer('/assets/sound/lovers_background.wav');
+    // Placeholder sounds
+    deathSlashBuffer = await loadSfxBuffer('/assets/sound/death-slash.wav');
+    symbolGlowBuffer = await loadSfxBuffer('/assets/sound/symbol-glow.wav');
     console.log('🔊 Sound effects preloaded');
   } catch (e) {
     console.warn('🔊 Could not preload sound effects:', e);
@@ -462,7 +467,9 @@ async function handleSpin() {
         gridView.getCols(),
         gridView.getRows(),
         threeBg,
-        app.canvas as HTMLCanvasElement
+        app.canvas as HTMLCanvasElement,
+        playSfx,
+        symbolGlowBuffer
       );
 
       await foolReveal.play(
@@ -550,7 +557,9 @@ async function handleSpin() {
         gridView.getRows(),
         gridView,
         threeBg,
-        app.canvas as HTMLCanvasElement
+        app.canvas as HTMLCanvasElement,
+        playSfx,
+        symbolGlowBuffer
       );
 
       currentPriestessAnimation = priestessReveal; // Store reference for hurry-up
@@ -667,7 +676,9 @@ async function handleSpin() {
         gridView.getRows(),
         gridView,
         threeBg,
-        app.canvas as HTMLCanvasElement
+        app.canvas as HTMLCanvasElement,
+        playSfx,
+        deathSlashBuffer,
       );
 
       currentDeathAnimation = deathReveal;
