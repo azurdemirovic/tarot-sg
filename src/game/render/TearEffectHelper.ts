@@ -149,6 +149,21 @@ export async function playTarotTearEffects(
     }
   };
 
+  // Play tear sound when the tear animation starts
+  try {
+    const tearCtx = new AudioContext();
+    const resp = await fetch('/assets/sound/tear-tarot.wav');
+    const buf = await tearCtx.decodeAudioData(await resp.arrayBuffer());
+    const src = tearCtx.createBufferSource();
+    src.buffer = buf;
+    const gain = tearCtx.createGain();
+    gain.gain.value = 2.5;
+    src.connect(gain);
+    gain.connect(tearCtx.destination);
+    src.start(0);
+    src.onended = () => tearCtx.close();
+  } catch (e) { console.warn('🔊 Tear sound failed:', e); }
+
   // Play tear effects with stagger, clipped to grid area
   await threeBg.playTearEffects(tearColumns, stagger, gridScreenRect, onReady);
 }

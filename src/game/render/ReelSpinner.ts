@@ -21,6 +21,40 @@ export class ReelSpinner extends Container {
   private bounceVelocity: number = 0;
   private bounceTime: number = 0;
 
+  // Landing sound — shared across all reel spinners
+  private static landAudioContext: AudioContext | null = null;
+  private static landAudioBuffer: AudioBuffer | null = null;
+  private static landSoundLoaded: boolean = false;
+
+  static async loadLandSound(): Promise<void> {
+    if (ReelSpinner.landSoundLoaded) return;
+    try {
+      ReelSpinner.landAudioContext = new AudioContext();
+      const response = await fetch('/assets/sound/land-normal.wav');
+      const arrayBuffer = await response.arrayBuffer();
+      ReelSpinner.landAudioBuffer = await ReelSpinner.landAudioContext.decodeAudioData(arrayBuffer);
+      ReelSpinner.landSoundLoaded = true;
+      console.log('🔊 Reel land sound loaded');
+    } catch (e) {
+      console.warn('🔊 Could not load land sound:', e);
+    }
+  }
+
+  private playLandSound(): void {
+    if (!ReelSpinner.landAudioContext || !ReelSpinner.landAudioBuffer) return;
+    // Resume context if suspended (browser autoplay policy)
+    if (ReelSpinner.landAudioContext.state === 'suspended') {
+      ReelSpinner.landAudioContext.resume();
+    }
+    const source = ReelSpinner.landAudioContext.createBufferSource();
+    source.buffer = ReelSpinner.landAudioBuffer;
+    const gain = ReelSpinner.landAudioContext.createGain();
+    gain.gain.value = 1.0;
+    source.connect(gain);
+    gain.connect(ReelSpinner.landAudioContext.destination);
+    source.start(0);
+  }
+
   private padding: number;
   private step: number; // cellSize + padding
   private maskGraphic: Graphics;
@@ -113,6 +147,7 @@ export class ReelSpinner extends Container {
         // Instant stop + bounce
         this.scrollOffset = this.targetOffset;
         this.isSpinning = false;
+        this.playLandSound();
         this.startBounce(intensity);
         
         // Wait for bounce to finish

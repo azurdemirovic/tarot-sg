@@ -9,6 +9,7 @@ import { LoversRevealAnimation } from './game/render/LoversRevealAnimation';
 import { PriestessRevealAnimation } from './game/render/PriestessRevealAnimation';
 import { DeathRevealAnimation } from './game/render/DeathRevealAnimation';
 import { ThreeBackground } from './threeBackground';
+import { ReelSpinner } from './game/render/ReelSpinner';
 import { TarotTitleDisplay } from './game/render/TarotTitleDisplay';
 import { DEBUG } from './game/config/debug';
 
@@ -121,6 +122,12 @@ async function init() {
       gridView.update(ticker.deltaTime);
     });
 
+    // ── Load reel landing sound ──
+    ReelSpinner.loadLandSound();
+
+    // ── Preload sound effects ──
+    preloadSoundEffects();
+
     // ── Background music (gapless loop via Web Audio API, starts on first user interaction) ──
     const startBgMusic = async () => {
       if (bgMusicStarted) return;
@@ -133,7 +140,7 @@ async function init() {
         const audioBuffer = await bgMusicContext.decodeAudioData(arrayBuffer);
 
         const gainNode = bgMusicContext.createGain();
-        gainNode.gain.value = 0.3;
+        gainNode.gain.value = 0.35;
         gainNode.connect(bgMusicContext.destination);
 
         const source = bgMusicContext.createBufferSource();
@@ -191,6 +198,7 @@ let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
 let hasSpunOnce: boolean = false; // Track if any spin has happened
+let jesterSoundPlayed: boolean = false; // Prevent double-fire of jester sound
 let foolFeatureActive: boolean = false; // Track if Fool feature is currently running
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
 let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
@@ -200,6 +208,34 @@ let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to a
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
 let bgMusicContext: AudioContext | null = null; // Web Audio API for gapless looping
 let bgMusicStarted = false;
+
+// ── Preloaded sound effects ──
+let sfxContext: AudioContext | null = null;
+let jesterTriggerBuffer: AudioBuffer | null = null;
+
+async function preloadSoundEffects(): Promise<void> {
+  try {
+    sfxContext = new AudioContext();
+    const resp = await fetch('/assets/sound/jester-trigger.wav');
+    const arrayBuffer = await resp.arrayBuffer();
+    jesterTriggerBuffer = await sfxContext.decodeAudioData(arrayBuffer);
+    console.log('🔊 Sound effects preloaded');
+  } catch (e) {
+    console.warn('🔊 Could not preload sound effects:', e);
+  }
+}
+
+function playSfx(buffer: AudioBuffer | null, volume: number = 0.6): void {
+  if (!sfxContext || !buffer) return;
+  if (sfxContext.state === 'suspended') sfxContext.resume();
+  const src = sfxContext.createBufferSource();
+  src.buffer = buffer;
+  const gain = sfxContext.createGain();
+  gain.gain.value = volume;
+  src.connect(gain);
+  gain.connect(sfxContext.destination);
+  src.start(0);
+}
 
 function resetState() {
   currentState = SpinState.IDLE;
@@ -258,6 +294,7 @@ async function handleSpin() {
   paylineOverlay.clear();
   winPanel.classList.remove('visible');
   canSkip = false;
+  jesterSoundPlayed = false; // Reset for this spin
 
   // Debug: Force feature if enabled (only on first spin)
   let spinOutput: SpinOutput;
@@ -304,6 +341,12 @@ async function handleSpin() {
       await delay(400); // Suspense pause — player sees cardbacks
       await gridView.flipTarotColumns(spinOutput.tarotColumns);
       await delay(300); // Brief pause to admire revealed tarots
+
+      // Play jester trigger sound once after Fool cards are revealed, before title card
+      if (spinOutput.feature?.type === 'T_FOOL' && !jesterSoundPlayed) {
+        jesterSoundPlayed = true;
+        playSfx(jesterTriggerBuffer, 0.6);
+      }
     }
 
     // ── Phase 1.75: Show tarot title card if a feature triggered ──
@@ -345,6 +388,7 @@ async function handleSpin() {
         spinOutput.totalWin,
         gameController.betAmount
       );
+
       foolFeatureActive = false;
       threeBg?.clearFeatureColor();
       await threeBg?.restoreModel();
