@@ -4,7 +4,7 @@
  */
 export const DEBUG = {
   /** Show all 5 tarot cards on the initial screen (one per column, as full-column stacks) */
-  showTarotsOnStart: false,
+  showTarotsOnStart: true,
 
   /** Enable the Three.js 3D background behind the Pixi canvas */
   BG_ENABLED: true,
@@ -31,7 +31,7 @@ export const DEBUG = {
   PRIESTESS_COLUMNS: [1, 3],
 
   /** Force Death feature on next spin (for testing) */
-  FORCE_DEATH: false,
+  FORCE_DEATH: true,
 
   /** Columns to place Death cards (2 or 3 columns) */
   DEATH_COLUMNS: [1, 3],

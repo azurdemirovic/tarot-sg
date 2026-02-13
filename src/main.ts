@@ -137,17 +137,17 @@ async function init() {
         bgMusicContext = new AudioContext();
         const response = await fetch('/assets/sound/bg-music.wav');
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await bgMusicContext.decodeAudioData(arrayBuffer);
+        bgMusicBuffer = await bgMusicContext.decodeAudioData(arrayBuffer);
 
-        const gainNode = bgMusicContext.createGain();
-        gainNode.gain.value = 0.35;
-        gainNode.connect(bgMusicContext.destination);
+        bgMusicGain = bgMusicContext.createGain();
+        bgMusicGain.gain.value = 0.35;
+        bgMusicGain.connect(bgMusicContext.destination);
 
-        const source = bgMusicContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.loop = true;
-        source.connect(gainNode);
-        source.start(0);
+        bgMusicSource = bgMusicContext.createBufferSource();
+        bgMusicSource.buffer = bgMusicBuffer;
+        bgMusicSource.loop = true;
+        bgMusicSource.connect(bgMusicGain);
+        bgMusicSource.start(0);
         console.log('🎵 Background music started (Web Audio API, gapless loop)');
       } catch (e) {
         bgMusicStarted = false; // allow retry on next interaction
@@ -198,7 +198,7 @@ let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
 let hasSpunOnce: boolean = false; // Track if any spin has happened
-let jesterSoundPlayed: boolean = false; // Prevent double-fire of jester sound
+let featureSoundPlayed: boolean = false; // Prevent double-fire of feature trigger sound
 let foolFeatureActive: boolean = false; // Track if Fool feature is currently running
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
 let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
@@ -208,17 +208,48 @@ let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to a
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
 let bgMusicContext: AudioContext | null = null; // Web Audio API for gapless looping
 let bgMusicStarted = false;
+let bgMusicSource: AudioBufferSourceNode | null = null;
+let bgMusicGain: GainNode | null = null;
+let bgMusicBuffer: AudioBuffer | null = null; // Store buffer for restart after pause
 
 // ── Preloaded sound effects ──
 let sfxContext: AudioContext | null = null;
 let jesterTriggerBuffer: AudioBuffer | null = null;
+let cupsTriggerBuffer: AudioBuffer | null = null;
+let loversTriggerBuffer: AudioBuffer | null = null;
+let priestessTriggerBuffer: AudioBuffer | null = null;
+let deathTriggerBuffer: AudioBuffer | null = null;
+let modelSpawnBuffer: AudioBuffer | null = null;
+let modelDespawnBuffer: AudioBuffer | null = null;
+let loversBackgroundBuffer: AudioBuffer | null = null;
+let loversBackgroundSource: AudioBufferSourceNode | null = null;
+let loversBackgroundGain: GainNode | null = null;
+
+async function loadSfxBuffer(url: string): Promise<AudioBuffer | null> {
+  try {
+    const resp = await fetch(url);
+    const arrayBuffer = await resp.arrayBuffer();
+    return await sfxContext!.decodeAudioData(arrayBuffer);
+  } catch (e) {
+    console.warn(`🔊 Could not load sound: ${url}`, e);
+    return null;
+  }
+}
 
 async function preloadSoundEffects(): Promise<void> {
   try {
     sfxContext = new AudioContext();
-    const resp = await fetch('/assets/sound/jester-trigger.wav');
-    const arrayBuffer = await resp.arrayBuffer();
-    jesterTriggerBuffer = await sfxContext.decodeAudioData(arrayBuffer);
+    // Feature trigger sounds
+    jesterTriggerBuffer = await loadSfxBuffer('/assets/sound/jester-trigger.wav');
+    cupsTriggerBuffer = await loadSfxBuffer('/assets/sound/cups_trigger.wav');
+    loversTriggerBuffer = await loadSfxBuffer('/assets/sound/lovers_trigger.wav');
+    priestessTriggerBuffer = await loadSfxBuffer('/assets/sound/priestess_trigger.wav');
+    deathTriggerBuffer = await loadSfxBuffer('/assets/sound/death_trigger.wav');
+    // Model spawn/despawn sounds (shared across all features)
+    modelSpawnBuffer = await loadSfxBuffer('/assets/sound/model_spawn.wav');
+    modelDespawnBuffer = await loadSfxBuffer('/assets/sound/model_despawn.wav');
+    // Feature-specific background music
+    loversBackgroundBuffer = await loadSfxBuffer('/assets/sound/lovers_background.wav');
     console.log('🔊 Sound effects preloaded');
   } catch (e) {
     console.warn('🔊 Could not preload sound effects:', e);
@@ -235,6 +266,50 @@ function playSfx(buffer: AudioBuffer | null, volume: number = 0.6): void {
   src.connect(gain);
   gain.connect(sfxContext.destination);
   src.start(0);
+}
+
+/** Stop default background music (for feature-specific BG music swap) */
+function stopBgMusic(): void {
+  if (bgMusicSource) {
+    try { bgMusicSource.stop(); } catch (_) { /* already stopped */ }
+    bgMusicSource = null;
+  }
+  console.log('🎵 Default background music stopped');
+}
+
+/** Restart default background music after a feature ends */
+function restartBgMusic(): void {
+  if (!bgMusicContext || !bgMusicBuffer || !bgMusicGain) return;
+  bgMusicSource = bgMusicContext.createBufferSource();
+  bgMusicSource.buffer = bgMusicBuffer;
+  bgMusicSource.loop = true;
+  bgMusicSource.connect(bgMusicGain);
+  bgMusicSource.start(0);
+  console.log('🎵 Default background music restarted');
+}
+
+/** Start Lovers background music (looping) */
+function startLoversBackground(): void {
+  if (!sfxContext || !loversBackgroundBuffer) return;
+  loversBackgroundGain = sfxContext.createGain();
+  loversBackgroundGain.gain.value = 0.35;
+  loversBackgroundGain.connect(sfxContext.destination);
+  loversBackgroundSource = sfxContext.createBufferSource();
+  loversBackgroundSource.buffer = loversBackgroundBuffer;
+  loversBackgroundSource.loop = true;
+  loversBackgroundSource.connect(loversBackgroundGain);
+  loversBackgroundSource.start(0);
+  console.log('🎵 Lovers background music started');
+}
+
+/** Stop Lovers background music */
+function stopLoversBackground(): void {
+  if (loversBackgroundSource) {
+    try { loversBackgroundSource.stop(); } catch (_) { /* already stopped */ }
+    loversBackgroundSource = null;
+    loversBackgroundGain = null;
+  }
+  console.log('🎵 Lovers background music stopped');
 }
 
 function resetState() {
@@ -294,7 +369,7 @@ async function handleSpin() {
   paylineOverlay.clear();
   winPanel.classList.remove('visible');
   canSkip = false;
-  jesterSoundPlayed = false; // Reset for this spin
+  featureSoundPlayed = false; // Reset for this spin
 
   // Debug: Force feature if enabled (only on first spin)
   let spinOutput: SpinOutput;
@@ -342,10 +417,20 @@ async function handleSpin() {
       await gridView.flipTarotColumns(spinOutput.tarotColumns);
       await delay(300); // Brief pause to admire revealed tarots
 
-      // Play jester trigger sound once after Fool cards are revealed, before title card
-      if (spinOutput.feature?.type === 'T_FOOL' && !jesterSoundPlayed) {
-        jesterSoundPlayed = true;
-        playSfx(jesterTriggerBuffer, 0.6);
+      // Play feature trigger sound once after tarot cards are revealed, before title card
+      if (spinOutput.feature && !featureSoundPlayed) {
+        featureSoundPlayed = true;
+        switch (spinOutput.feature.type) {
+          case 'T_FOOL':      playSfx(jesterTriggerBuffer, 0.6); break;
+          case 'T_CUPS':      playSfx(cupsTriggerBuffer, 0.6); break;
+          case 'T_LOVERS':
+            playSfx(loversTriggerBuffer, 0.6);
+            stopBgMusic();
+            startLoversBackground();
+            break;
+          case 'T_PRIESTESS': playSfx(priestessTriggerBuffer, 0.6); break;
+          case 'T_DEATH':     playSfx(deathTriggerBuffer, 0.6); break;
+        }
       }
     }
 
@@ -365,6 +450,7 @@ async function handleSpin() {
       threeBg?.setFeatureColor('T_FOOL');
 
       // Swap 3D model to nightmare jester
+      playSfx(modelSpawnBuffer, 0.6);
       await threeBg?.swapToModel();
 
       const foolReveal = new FoolRevealAnimation(
@@ -391,6 +477,7 @@ async function handleSpin() {
 
       foolFeatureActive = false;
       threeBg?.clearFeatureColor();
+      playSfx(modelDespawnBuffer, 0.6);
       await threeBg?.restoreModel();
     }
 
@@ -401,6 +488,7 @@ async function handleSpin() {
       threeBg?.setFeatureColor('T_CUPS');
 
       // Swap 3D model to sol (drops in from above)
+      playSfx(modelSpawnBuffer, 0.6);
       await threeBg?.swapToSol();
 
       const cupsReveal = new CupsRevealAnimation(
@@ -428,6 +516,7 @@ async function handleSpin() {
       cupsFeatureActive = false;
       currentCupsAnimation = null;
       threeBg?.clearFeatureColor();
+      playSfx(modelDespawnBuffer, 0.6);
       await threeBg?.restoreSol();
 
       // Restore all reel columns to visible
@@ -448,6 +537,7 @@ async function handleSpin() {
       threeBg?.setFeatureColor('T_PRIESTESS');
 
       // Swap 3D model to queen of swords (scales up)
+      playSfx(modelSpawnBuffer, 0.6);
       await threeBg?.swapToQueen();
 
       const priestessReveal = new PriestessRevealAnimation(
@@ -482,6 +572,7 @@ async function handleSpin() {
       priestessFeatureActive = false;
       currentPriestessAnimation = null;
       threeBg?.clearFeatureColor();
+      playSfx(modelDespawnBuffer, 0.6);
       await threeBg?.restoreQueen();
 
       // Restore all reel columns to visible
@@ -500,6 +591,7 @@ async function handleSpin() {
       spinBtn.disabled = true;
       loversFeatureActive = true;
       threeBg?.setFeatureColor('T_LOVERS');
+      playSfx(modelSpawnBuffer, 0.6);
       await threeBg?.swapToLovers();
 
       const loversReveal = new LoversRevealAnimation(
@@ -543,7 +635,10 @@ async function handleSpin() {
         gameController.betAmount
       );
       loversFeatureActive = false;
+      stopLoversBackground();
+      restartBgMusic();
       threeBg?.clearFeatureColor();
+      playSfx(modelDespawnBuffer, 0.6);
       await threeBg?.restoreLovers();
 
       // Restore all reel columns to visible after Lovers
@@ -559,6 +654,7 @@ async function handleSpin() {
       threeBg?.setFeatureColor('T_DEATH');
 
       // Bring in the Death 3D model
+      playSfx(modelSpawnBuffer, 0.6);
       await threeBg?.swapToDeath();
 
       const deathReveal = new DeathRevealAnimation(
@@ -596,6 +692,7 @@ async function handleSpin() {
       // In Death debug mode, keep the visual state (3D model + color tint) active
       if (!DEBUG.DEATH_MODE) {
         threeBg?.clearFeatureColor();
+        playSfx(modelDespawnBuffer, 0.6);
         await threeBg?.restoreDeath();
       }
 
