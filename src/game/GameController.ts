@@ -73,7 +73,7 @@ export class GameController {
     this.paylineEvaluator.currentBetAmount = this.betAmount;
 
     // ── Phase 1: generate raw grid (with possible tarot columns) ──
-    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.8);
+    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.05);
     this.currentGrid = initialGrid;
     this.lastTarotColumns = tarotColumns;
 

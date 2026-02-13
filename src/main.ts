@@ -394,6 +394,10 @@ async function handleSpin() {
     console.log('🔧 DEBUG: Forcing Death feature (first spin only)');
     hasSpunOnce = true;
     spinOutput = gameController.forceTarotSpin('T_DEATH', DEBUG.DEATH_COLUMNS);
+  } else if (!hasSpunOnce && DEBUG.FORCE_FOOL) {
+    console.log('🔧 DEBUG: Forcing Fool feature (first spin only)');
+    hasSpunOnce = true;
+    spinOutput = gameController.forceTarotSpin('T_FOOL', DEBUG.FOOL_COLUMNS);
   } else {
     spinOutput = gameController.spin();
     hasSpunOnce = true;

@@ -157,7 +157,7 @@ export async function playTarotTearEffects(
     const src = tearCtx.createBufferSource();
     src.buffer = buf;
     const gain = tearCtx.createGain();
-    gain.gain.value = 2.5;
+    gain.gain.value = 1.0;
     src.connect(gain);
     gain.connect(tearCtx.destination);
     src.start(0);
