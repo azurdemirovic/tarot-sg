@@ -1,203 +1,232 @@
 /**
- * Centralized sound manager for all game audio.
- * Handles background music, sound effects, and per-feature background tracks.
- * All audio goes through a single AudioContext to avoid browser limitations.
+ * Centralized sound manager — single audio authority for the entire game.
+ * Handles background music, feature music, one-shot SFX, looping SFX, and fading.
  */
 
 export class SoundManager {
   private context: AudioContext | null = null;
   private buffers: Map<string, AudioBuffer> = new Map();
 
-  private bgMusicSource: AudioBufferSourceNode | null = null;
-  private bgMusicGain: GainNode | null = null;
-  private bgMusicStarted = false;
+  private bgSource: AudioBufferSourceNode | null = null;
+  private bgGain: GainNode | null = null;
+  private bgStarted = false;
 
-  private featureBgSource: AudioBufferSourceNode | null = null;
-  private featureBgGain: GainNode | null = null;
+  private featureSource: AudioBufferSourceNode | null = null;
+  private featureGain: GainNode | null = null;
 
-  /** Sound effect paths — loaded during init */
+  private loopingSources: Map<string, { source: AudioBufferSourceNode; gain: GainNode }> = new Map();
+
   private static readonly SFX_PATHS: Record<string, string> = {
-    'bg-music':          '/assets/sound/bg-music.wav',
-    'land-normal':       '/assets/sound/land-normal.wav',
-    'jester-trigger':    '/assets/sound/jester-trigger.wav',
-    'cups-trigger':      '/assets/sound/cups_trigger.wav',
-    'lovers-trigger':    '/assets/sound/lovers_trigger.wav',
-    'priestess-trigger': '/assets/sound/priestess_trigger.wav',
-    'death-trigger':     '/assets/sound/death_trigger.wav',
-    'model-spawn':       '/assets/sound/model_spawn.wav',
-    'model-despawn':     '/assets/sound/model_despawn.wav',
-    'lovers-background': '/assets/sound/lovers_background.wav',
-    'death-slash':       '/assets/sound/death-slash.wav',
-    'symbol-glow':       '/assets/sound/symbol-glow.wav',
-    'tear-tarot':        '/assets/sound/tear-tarot.wav',
+    'bg-music':           '/assets/sound/bg-music.wav',
+    'land-normal':        '/assets/sound/land-normal.wav',
+    'jester-trigger':     '/assets/sound/jester-trigger.wav',
+    'cups-trigger':       '/assets/sound/cups_trigger.wav',
+    'lovers-trigger':     '/assets/sound/lovers_trigger.wav',
+    'priestess-trigger':  '/assets/sound/priestess_trigger.wav',
+    'death-trigger':      '/assets/sound/death_trigger.wav',
+    'model-spawn':        '/assets/sound/model_spawn.wav',
+    'model-despawn':      '/assets/sound/model_despawn.wav',
+    'lovers-background':  '/assets/sound/lovers_background.wav',
+    'death-slash':        '/assets/sound/death-slash.wav',
+    'symbol-glow':        '/assets/sound/symbol-glow.wav',
+    'tear-tarot':         '/assets/sound/tear-tarot.wav',
+    'tarot-flip':         '/assets/sound/tarot-flip.wav',
+    'tarot-land':         '/assets/sound/tarot-land.wav',
+    'payline-win':        '/assets/sound/payline-win.wav',
+    'win-countup':        '/assets/sound/win-countup.wav',
+    'anchor-move':        '/assets/sound/anchor-move.wav',
   };
 
-  /** Initialize the audio context. Must be called after a user gesture. */
   async init(): Promise<void> {
     if (this.context) return;
     try {
       this.context = new AudioContext();
-      console.log('🔊 SoundManager initialized');
     } catch (e) {
-      console.warn('🔊 Could not create AudioContext:', e);
+      console.warn('Could not create AudioContext:', e);
     }
   }
 
-  /** Preload all sound effects. */
   async preloadAll(): Promise<void> {
     await this.init();
     if (!this.context) return;
-
-    const promises = Object.entries(SoundManager.SFX_PATHS).map(
-      ([key, path]) => this.loadBuffer(key, path)
-    );
-    await Promise.all(promises);
+    const entries = Object.entries(SoundManager.SFX_PATHS);
+    await Promise.all(entries.map(([key, path]) => this.loadBuffer(key, path)));
     console.log(`🔊 ${this.buffers.size} sounds preloaded`);
   }
 
-  /** Load a single audio buffer by key and path. */
   private async loadBuffer(key: string, path: string): Promise<void> {
     if (!this.context) return;
     try {
       const resp = await fetch(path);
-      const arrayBuffer = await resp.arrayBuffer();
-      const audioBuffer = await this.context.decodeAudioData(arrayBuffer);
-      this.buffers.set(key, audioBuffer);
+      const ab = await resp.arrayBuffer();
+      this.buffers.set(key, await this.context.decodeAudioData(ab));
     } catch (e) {
-      console.warn(`🔊 Could not load sound: ${path}`, e);
+      console.warn(`Could not load sound: ${path}`, e);
     }
   }
 
-  /** Get a preloaded audio buffer by key. */
+  private ensureResumed(): void {
+    if (this.context?.state === 'suspended') this.context.resume();
+  }
+
+  getContext(): AudioContext | null {
+    return this.context;
+  }
+
   getBuffer(key: string): AudioBuffer | null {
     return this.buffers.get(key) ?? null;
   }
 
-  /** Ensure context is resumed (browser autoplay policy). */
-  private ensureResumed(): void {
-    if (this.context?.state === 'suspended') {
-      this.context.resume();
-    }
-  }
+  // ── One-shot SFX ──
 
-  /**
-   * Play a one-shot sound effect.
-   * @param key - Buffer key (e.g. 'death-slash')
-   * @param volume - Gain value (0-1, default 0.6)
-   */
-  playSfx(key: string, volume: number = 0.6): void {
-    if (!this.context) return;
+  play(key: string, volume = 0.6): void {
     const buffer = this.buffers.get(key);
-    if (!buffer) return;
-    this.ensureResumed();
-
-    const src = this.context.createBufferSource();
-    src.buffer = buffer;
-    const gain = this.context.createGain();
-    gain.gain.value = volume;
-    src.connect(gain);
-    gain.connect(this.context.destination);
-    src.start(0);
-  }
-
-  /**
-   * Play a one-shot from a raw AudioBuffer (for compatibility with existing code).
-   * @param buffer - AudioBuffer to play
-   * @param volume - Gain value
-   */
-  playBuffer(buffer: AudioBuffer | null, volume: number = 0.6): void {
     if (!this.context || !buffer) return;
     this.ensureResumed();
-
     const src = this.context.createBufferSource();
     src.buffer = buffer;
     const gain = this.context.createGain();
     gain.gain.value = volume;
-    src.connect(gain);
-    gain.connect(this.context.destination);
+    src.connect(gain).connect(this.context.destination);
     src.start(0);
   }
 
-  /** Start background music (gapless loop). */
-  startBgMusic(volume: number = 0.35): void {
-    if (!this.context || this.bgMusicStarted) return;
+  // ── Background Music ──
+
+  startBgMusic(volume = 0.35, fadeIn = 0): void {
+    if (!this.context || this.bgStarted) return;
     const buffer = this.buffers.get('bg-music');
     if (!buffer) return;
 
-    this.bgMusicGain = this.context.createGain();
-    this.bgMusicGain.gain.value = volume;
-    this.bgMusicGain.connect(this.context.destination);
+    this.bgGain = this.context.createGain();
+    this.bgGain.gain.value = fadeIn > 0 ? 0 : volume;
+    this.bgGain.connect(this.context.destination);
 
-    this.bgMusicSource = this.context.createBufferSource();
-    this.bgMusicSource.buffer = buffer;
-    this.bgMusicSource.loop = true;
-    this.bgMusicSource.connect(this.bgMusicGain);
-    this.bgMusicSource.start(0);
-    this.bgMusicStarted = true;
-    console.log('🎵 Background music started');
-  }
+    this.bgSource = this.context.createBufferSource();
+    this.bgSource.buffer = buffer;
+    this.bgSource.loop = true;
+    this.bgSource.connect(this.bgGain);
+    this.bgSource.start(0);
+    this.bgStarted = true;
 
-  /** Stop background music. */
-  stopBgMusic(): void {
-    if (this.bgMusicSource) {
-      try { this.bgMusicSource.stop(); } catch (_) { /* already stopped */ }
-      this.bgMusicSource = null;
+    if (fadeIn > 0) {
+      this.bgGain.gain.linearRampToValueAtTime(volume, this.context.currentTime + fadeIn);
     }
-    console.log('🎵 Background music stopped');
   }
 
-  /** Restart background music after a feature ends. */
-  restartBgMusic(): void {
-    if (!this.context || !this.bgMusicGain) return;
+  async stopBgMusic(fadeOut = 0): Promise<void> {
+    if (!this.bgSource || !this.bgGain || !this.context) return;
+    if (fadeOut > 0) {
+      const now = this.context.currentTime;
+      this.bgGain.gain.setValueAtTime(this.bgGain.gain.value, now);
+      this.bgGain.gain.linearRampToValueAtTime(0, now + fadeOut);
+      await this.waitMs(fadeOut * 1000 + 50);
+    }
+    try { this.bgSource.stop(); } catch (_) {}
+    this.bgSource = null;
+  }
+
+  restartBgMusic(volume = 0.35, fadeIn = 0): void {
+    if (!this.context || !this.bgGain) return;
     const buffer = this.buffers.get('bg-music');
     if (!buffer) return;
 
-    this.bgMusicSource = this.context.createBufferSource();
-    this.bgMusicSource.buffer = buffer;
-    this.bgMusicSource.loop = true;
-    this.bgMusicSource.connect(this.bgMusicGain);
-    this.bgMusicSource.start(0);
-    console.log('🎵 Background music restarted');
+    this.bgSource = this.context.createBufferSource();
+    this.bgSource.buffer = buffer;
+    this.bgSource.loop = true;
+    this.bgSource.connect(this.bgGain);
+
+    if (fadeIn > 0) {
+      this.bgGain.gain.setValueAtTime(0, this.context.currentTime);
+      this.bgGain.gain.linearRampToValueAtTime(volume, this.context.currentTime + fadeIn);
+    } else {
+      this.bgGain.gain.value = volume;
+    }
+    this.bgSource.start(0);
   }
 
-  /** Start a looping feature background track (e.g. Lovers). */
-  startFeatureBg(key: string, volume: number = 0.35): void {
+  get isBgMusicStarted(): boolean {
+    return this.bgStarted;
+  }
+
+  // ── Feature Background Music (e.g. Lovers) ──
+
+  startFeatureMusic(key: string, volume = 0.35, fadeIn = 0): void {
     if (!this.context) return;
     const buffer = this.buffers.get(key);
     if (!buffer) return;
 
-    this.featureBgGain = this.context.createGain();
-    this.featureBgGain.gain.value = volume;
-    this.featureBgGain.connect(this.context.destination);
+    this.featureGain = this.context.createGain();
+    this.featureGain.gain.value = fadeIn > 0 ? 0 : volume;
+    this.featureGain.connect(this.context.destination);
 
-    this.featureBgSource = this.context.createBufferSource();
-    this.featureBgSource.buffer = buffer;
-    this.featureBgSource.loop = true;
-    this.featureBgSource.connect(this.featureBgGain);
-    this.featureBgSource.start(0);
-    console.log(`🎵 Feature background started: ${key}`);
-  }
+    this.featureSource = this.context.createBufferSource();
+    this.featureSource.buffer = buffer;
+    this.featureSource.loop = true;
+    this.featureSource.connect(this.featureGain);
+    this.featureSource.start(0);
 
-  /** Stop the current feature background track. */
-  stopFeatureBg(): void {
-    if (this.featureBgSource) {
-      try { this.featureBgSource.stop(); } catch (_) { /* already stopped */ }
-      this.featureBgSource = null;
-      this.featureBgGain = null;
+    if (fadeIn > 0) {
+      this.featureGain.gain.linearRampToValueAtTime(volume, this.context.currentTime + fadeIn);
     }
-    console.log('🎵 Feature background stopped');
   }
 
-  /** Whether background music has been started at least once. */
-  get isBgMusicStarted(): boolean {
-    return this.bgMusicStarted;
+  async stopFeatureMusic(fadeOut = 0): Promise<void> {
+    if (!this.featureSource || !this.featureGain || !this.context) return;
+    if (fadeOut > 0) {
+      const now = this.context.currentTime;
+      this.featureGain.gain.setValueAtTime(this.featureGain.gain.value, now);
+      this.featureGain.gain.linearRampToValueAtTime(0, now + fadeOut);
+      await this.waitMs(fadeOut * 1000 + 50);
+    }
+    try { this.featureSource.stop(); } catch (_) {}
+    this.featureSource = null;
+    this.featureGain = null;
   }
 
-  /** Get the AudioContext (for ReelSpinner land sound compatibility). */
-  getContext(): AudioContext | null {
-    return this.context;
+  // ── Looping SFX (e.g. win count-up) ──
+
+  startLoop(key: string, volume = 0.35): void {
+    if (!this.context) return;
+    const buffer = this.buffers.get(key);
+    if (!buffer) return;
+    this.ensureResumed();
+
+    const gain = this.context.createGain();
+    gain.gain.value = volume;
+    gain.connect(this.context.destination);
+
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(gain);
+    source.start(0);
+
+    this.loopingSources.set(key, { source, gain });
+  }
+
+  stopLoop(key: string, fadeOut = 0.15): void {
+    const entry = this.loopingSources.get(key);
+    if (!entry || !this.context) return;
+    this.loopingSources.delete(key);
+
+    if (fadeOut > 0) {
+      const now = this.context.currentTime;
+      entry.gain.gain.setValueAtTime(entry.gain.gain.value, now);
+      entry.gain.gain.linearRampToValueAtTime(0, now + fadeOut);
+      setTimeout(() => {
+        try { entry.source.stop(); } catch (_) {}
+        entry.gain.disconnect();
+      }, fadeOut * 1000 + 50);
+    } else {
+      try { entry.source.stop(); } catch (_) {}
+      entry.gain.disconnect();
+    }
+  }
+
+  private waitMs(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
-/** Global singleton instance. */
 export const soundManager = new SoundManager();

@@ -23,31 +23,8 @@ import { GridView } from './GridView';
 import { WinDisplay } from './WinDisplay';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-
-// ── Helpers ──────────────────────────────────────────────────────
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function tween(
-  duration: number,
-  onUpdate: (t: number) => void,
-  easeFn: (t: number) => number = t => t
-): Promise<void> {
-  return new Promise(resolve => {
-    const start = performance.now();
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      const raw = Math.min(elapsed / duration, 1);
-      onUpdate(easeFn(raw));
-      if (raw < 1) requestAnimationFrame(tick);
-      else resolve();
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3); }
+import { tween, wait, easeOutCubic } from '../utils/AnimationUtils';
+import { soundManager } from '../utils/SoundManager';
 
 export class DeathRevealAnimation {
   // @ts-ignore -- tracked for potential future use
@@ -71,8 +48,6 @@ export class DeathRevealAnimation {
     private gridView: GridView,
     private threeBg: ThreeBackground | null = null,
     private pixiCanvas: HTMLCanvasElement | null = null,
-    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void,
-    private deathSlashBuffer: AudioBuffer | null,
   ) {
     this.overlayContainer = new Container();
   }
@@ -366,7 +341,7 @@ export class DeathRevealAnimation {
 
     if (spinResult.slashedCells.length === 0) return;
 
-    this.playSfx(this.deathSlashBuffer, 0.5);
+    soundManager.play('death-slash', 0.5);
 
     // Create glow overlays on all slashed cells simultaneously
     const cellOverlays: Graphics[] = [];

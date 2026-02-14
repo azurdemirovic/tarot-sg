@@ -3,55 +3,10 @@ import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { FoolResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
-import { WinDisplay } from './WinDisplay';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-
-// ─── Easing helpers ───────────────────────────────────────────
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
-
-function easeOutBack(t: number): number {
-  const c1 = 1.70158;
-  const c3 = c1 + 1;
-  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-}
-
-function easeInOutQuad(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
-
-function linear(t: number): number {
-  return t;
-}
-
-// ─── Tween utility (requestAnimationFrame based) ─────────────
-function tween(
-  duration: number,
-  onUpdate: (t: number) => void,
-  easing: (t: number) => number = easeInOutQuad
-): Promise<void> {
-  return new Promise(resolve => {
-    const start = performance.now();
-    function frame(now: number) {
-      const elapsed = now - start;
-      const raw = Math.min(elapsed / duration, 1);
-      const t = easing(raw);
-      onUpdate(t);
-      if (raw < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(frame);
-  });
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { tween, wait, easeOutCubic, easeInOutQuad, linear } from '../utils/AnimationUtils';
+import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
 //  FoolRevealAnimation
@@ -75,8 +30,6 @@ export class FoolRevealAnimation {
     private rows: number,
     private threeBg: ThreeBackground | null = null,
     private pixiCanvas: HTMLCanvasElement | null = null,
-    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void,
-    private symbolGlowBuffer: AudioBuffer | null
   ) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
@@ -236,7 +189,7 @@ export class FoolRevealAnimation {
 
   // ── Spawn dark, diffuse particle-like glow behind a WILD cell ──
   private spawnWildGlow(col: number, row: number, step: number): void {
-    this.playSfx(this.symbolGlowBuffer, 0.4);
+    soundManager.play('symbol-glow', 0.4);
     const cx = col * step + this.cellSize / 2;
     const cy = row * step + this.cellSize / 2;
 

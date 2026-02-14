@@ -1,39 +1,6 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
-
-// ─── Easing helpers ───────────────────────────────────────────
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
-
-function easeInOutQuad(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
-
-function tween(
-  duration: number,
-  onUpdate: (t: number) => void,
-  easing: (t: number) => number = easeInOutQuad
-): Promise<void> {
-  return new Promise(resolve => {
-    const start = performance.now();
-    function frame(now: number) {
-      const elapsed = now - start;
-      const raw = Math.min(elapsed / duration, 1);
-      const t = easing(raw);
-      onUpdate(t);
-      if (raw < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(frame);
-  });
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { tween, wait, easeOutCubic } from '../utils/AnimationUtils';
+import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
 //  WinDisplay
@@ -42,38 +9,16 @@ function wait(ms: number): Promise<void> {
 //  Supports looping sound during count-up and skip-to-end via requestSkip().
 // ═══════════════════════════════════════════════════════════════
 
-/** Options for sound playback during win display */
-export interface WinDisplaySoundOptions {
-  /** Function to play a one-shot sound effect */
-  playSfx: (buffer: AudioBuffer | null, volume?: number) => void;
-  /** AudioBuffer for the looping count-up tick sound */
-  countUpBuffer: AudioBuffer | null;
-  /** AudioContext used for creating looping source */
-  sfxContext: AudioContext | null;
-}
-
 export class WinDisplay {
   private overlay: Container;
   private dimGraphic: Graphics;
   private totalText: Text | null = null;
   private betAmount: number = 1;
-
-  // Skip support
   private skipRequested: boolean = false;
-
-  // Looping count-up sound
-  private countUpSource: AudioBufferSourceNode | null = null;
-  private countUpGain: GainNode | null = null;
-  private soundOptions: WinDisplaySoundOptions | null = null;
 
   constructor(private parent: Container) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
-  }
-
-  /** Configure sound options (call before show/showAlways) */
-  setSoundOptions(options: WinDisplaySoundOptions): void {
-    this.soundOptions = options;
   }
 
   /** Request the count-up to skip to the final value immediately */
@@ -191,51 +136,12 @@ export class WinDisplay {
     });
   }
 
-  // ── Start looping count-up sound ──
   private startCountUpSound(): void {
-    if (!this.soundOptions?.sfxContext || !this.soundOptions.countUpBuffer) return;
-    const ctx = this.soundOptions.sfxContext;
-    if (ctx.state === 'suspended') ctx.resume();
-
-    this.countUpGain = ctx.createGain();
-    this.countUpGain.gain.value = 0.35;
-    this.countUpGain.connect(ctx.destination);
-
-    this.countUpSource = ctx.createBufferSource();
-    this.countUpSource.buffer = this.soundOptions.countUpBuffer;
-    this.countUpSource.loop = true;
-    this.countUpSource.connect(this.countUpGain);
-    this.countUpSource.start(0);
+    soundManager.startLoop('win-countup', 0.35);
   }
 
-  // ── Stop looping count-up sound with fade-out ──
   private stopCountUpSound(): void {
-    if (this.countUpGain && this.countUpSource && this.soundOptions?.sfxContext) {
-      const ctx = this.soundOptions.sfxContext;
-      const fadeTime = 0.15; // 150ms fade-out
-      const now = ctx.currentTime;
-      this.countUpGain.gain.setValueAtTime(this.countUpGain.gain.value, now);
-      this.countUpGain.gain.linearRampToValueAtTime(0, now + fadeTime);
-      // Schedule stop after fade completes
-      const src = this.countUpSource;
-      const gain = this.countUpGain;
-      setTimeout(() => {
-        try { src.stop(); } catch (_) { /* already stopped */ }
-        gain.disconnect();
-      }, fadeTime * 1000 + 50);
-      this.countUpSource = null;
-      this.countUpGain = null;
-    } else {
-      // Fallback: immediate stop if no context available
-      if (this.countUpSource) {
-        try { this.countUpSource.stop(); } catch (_) { /* already stopped */ }
-        this.countUpSource = null;
-      }
-      if (this.countUpGain) {
-        this.countUpGain.disconnect();
-        this.countUpGain = null;
-      }
-    }
+    soundManager.stopLoop('win-countup', 0.15);
   }
 
   // ── Win Display (Grid Dim + Headline + Payout + Multiplier + Total) ──

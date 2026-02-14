@@ -6,48 +6,7 @@ import { ReelSpinner } from './ReelSpinner';
 import { RNG } from '../RNG';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-
-// ─── Easing helpers ───────────────────────────────────────────
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
-
-function easeOutBack(t: number): number {
-  const c1 = 1.70158;
-  const c3 = c1 + 1;
-  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-}
-
-function easeInOutQuad(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
-
-// ─── Tween utility (requestAnimationFrame based) ─────────────
-function tween(
-  duration: number,
-  onUpdate: (t: number) => void,
-  easing: (t: number) => number = easeInOutQuad
-): Promise<void> {
-  return new Promise(resolve => {
-    const start = performance.now();
-    function frame(now: number) {
-      const elapsed = now - start;
-      const raw = Math.min(elapsed / duration, 1);
-      const t = easing(raw);
-      onUpdate(t);
-      if (raw < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        resolve();
-      }
-    }
-    requestAnimationFrame(frame);
-  });
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { tween, wait, easeOutCubic, easeOutBack } from '../utils/AnimationUtils';
 
 // ═══════════════════════════════════════════════════════════════
 //  CupsRevealAnimation
