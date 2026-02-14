@@ -19,7 +19,7 @@ export const DEBUG = {
   CUPS_COLUMNS: [1, 3],
 
   /** Force Lovers feature on next spin (for testing) */
-  FORCE_LOVERS: false,
+  FORCE_LOVERS: true,
 
   /** Columns to place Lovers cards (2 or 3 columns) */
   LOVERS_COLUMNS: [1, 3],
@@ -31,7 +31,7 @@ export const DEBUG = {
   PRIESTESS_COLUMNS: [1, 3],
 
   /** Force Death feature on next spin (for testing) */
-  FORCE_DEATH: true,
+  FORCE_DEATH: false,
 
   /** Columns to place Death cards (2 or 3 columns) */
   DEATH_COLUMNS: [1, 3],
@@ -41,6 +41,12 @@ export const DEBUG = {
 
   /** Columns to place Fool cards (2 or 3 columns) */
   FOOL_COLUMNS: [1, 3],
+
+  /** Force Fool feature with guaranteed big win (3 Fool columns = ×5 multiplier + max wilds) */
+  FORCE_FOOL_BIG_WIN: true,
+
+  /** Columns to place Fool cards for big win (3 columns for ×5 multiplier) */
+  FOOL_BIG_WIN_COLUMNS: [0, 2, 4],
 
   /** Show payline connection lines (debug visualization) */
   SHOW_PAYLINES: false,

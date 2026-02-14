@@ -157,6 +157,12 @@ export class GridView extends Container {
 
   private pendingStopTimers: ReturnType<typeof setTimeout>[] = [];
   private spinDoneResolve: (() => void) | null = null;
+  private onReelLandCallback: ((col: number) => void) | null = null;
+
+  /** Set a callback that fires when each reel lands (col index passed). */
+  setOnReelLand(callback: ((col: number) => void) | null): void {
+    this.onReelLandCallback = callback;
+  }
 
   async spinToGrid(grid: Grid, tarotColumns: TarotColumn[] = []): Promise<void> {
     this.isAnimating = true;
@@ -205,11 +211,14 @@ export class GridView extends Container {
     
     // Rapid-fire stop remaining scrolling reels (60ms apart)
     let delay = 0;
-    this.reelSpinners.forEach((reel) => {
+    this.reelSpinners.forEach((reel, col) => {
       if (reel.isStillScrolling()) {
         const timer = setTimeout(() => {
           if (reel.isStillScrolling()) {
             reel.requestStop(0, 0.7);
+            if (this.onReelLandCallback) {
+              this.onReelLandCallback(col);
+            }
           }
         }, delay);
         this.pendingStopTimers.push(timer);
@@ -227,6 +236,9 @@ export class GridView extends Container {
       const delay = baseDelay + col * stagger;
       const timer = setTimeout(() => {
         reel.requestStop(0, intensity);
+        if (this.onReelLandCallback) {
+          this.onReelLandCallback(col);
+        }
       }, delay);
       this.pendingStopTimers.push(timer);
     });

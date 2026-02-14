@@ -12,6 +12,8 @@ export interface FoolResult {
 export interface CupsResult {
   initialMultipliers: { col: number; row: number; value: number }[];
   cupsColumns: number[];
+  /** Sum of all multiplier cell values — payout = totalMultiplierSum × betAmount */
+  totalMultiplierSum: number;
 }
 
 export interface LoversSpinResult {
@@ -244,9 +246,10 @@ export class TarotFeatureProcessor {
     });
 
     const totalMultipliers = initialMultipliers.length;
-    console.log(`☕ Cups Feature: ${trigger.count} Cups → ${totalMultipliers} initial multipliers`);
+    const totalMultiplierSum = initialMultipliers.reduce((sum, m) => sum + m.value, 0);
+    console.log(`☕ Cups Feature: ${trigger.count} Cups → ${totalMultipliers} multiplier cells, total sum: ${totalMultiplierSum}×`);
 
-    return { initialMultipliers, cupsColumns: trigger.columns };
+    return { initialMultipliers, cupsColumns: trigger.columns, totalMultiplierSum };
   }
 
   /** Symbols that are anchors only and must never appear as bond candidates */
@@ -308,15 +311,15 @@ export class TarotFeatureProcessor {
 
   /**
    * Roll MALE and FEMALE anchor positions with weighted area size.
-   * Area ranges from 1×1 to 5×3, biased toward middle-ground for testing.
+   * Area ranges from 1×1 to 5×3, biased toward smaller areas for balanced RTP.
    * 
    * Rarity tiers (area = width × height):
-   *   Tiny (1×1):        5%
-   *   Small (2×1, 1×2):  10%
-   *   Medium (2×2, 3×2): 35%
-   *   Large (3×3, 4×2):  30%
-   *   Huge (4×3, 5×2):   15%
-   *   Full (5×3):        5%
+   *   Tiny (1×1):        15%
+   *   Small (2×1, 1×2):  25%
+   *   Medium (2×2, 3×1): 30%
+   *   Large (3×2, 2×3):  18%
+   *   Huge (4×2, 3×3):   9%
+   *   Full (5×2, 4×3):   3%
    */
   private rollAnchorPositions(cols: number, rows: number): { malePos: { col: number; row: number }; femalePos: { col: number; row: number } } {
     // Roll area tier
@@ -324,28 +327,29 @@ export class TarotFeatureProcessor {
     let targetWidth: number;
     let targetHeight: number;
 
-    if (roll < 0.05) {
+    if (roll < 0.15) {
       // Tiny: 1×1
       targetWidth = 1; targetHeight = 1;
-    } else if (roll < 0.15) {
+    } else if (roll < 0.40) {
       // Small: 2×1 or 1×2
       if (this.rng.nextFloat() < 0.5) { targetWidth = 2; targetHeight = 1; }
       else { targetWidth = 1; targetHeight = 2; }
-    } else if (roll < 0.50) {
-      // Medium: 2×2 or 3×2
+    } else if (roll < 0.70) {
+      // Medium: 2×2 or 3×1
       if (this.rng.nextFloat() < 0.5) { targetWidth = 2; targetHeight = 2; }
-      else { targetWidth = 3; targetHeight = 2; }
-    } else if (roll < 0.80) {
-      // Large: 3×3 or 4×2
-      if (this.rng.nextFloat() < 0.5) { targetWidth = 3; targetHeight = 3; }
-      else { targetWidth = 4; targetHeight = 2; }
-    } else if (roll < 0.95) {
-      // Huge: 4×3 or 5×2
-      if (this.rng.nextFloat() < 0.5) { targetWidth = 4; targetHeight = 3; }
-      else { targetWidth = 5; targetHeight = 2; }
+      else { targetWidth = 3; targetHeight = 1; }
+    } else if (roll < 0.88) {
+      // Large: 3×2 or 2×3
+      if (this.rng.nextFloat() < 0.5) { targetWidth = 3; targetHeight = 2; }
+      else { targetWidth = 2; targetHeight = 3; }
+    } else if (roll < 0.97) {
+      // Huge: 4×2 or 3×3
+      if (this.rng.nextFloat() < 0.5) { targetWidth = 4; targetHeight = 2; }
+      else { targetWidth = 3; targetHeight = 3; }
     } else {
-      // Full: 5×3
-      targetWidth = 5; targetHeight = 3;
+      // Full: 5×2 or 4×3
+      if (this.rng.nextFloat() < 0.5) { targetWidth = 5; targetHeight = 2; }
+      else { targetWidth = 4; targetHeight = 3; }
     }
 
     // Clamp to grid bounds

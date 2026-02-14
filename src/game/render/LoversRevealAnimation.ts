@@ -71,7 +71,10 @@ export class LoversRevealAnimation {
     private rows: number,
     private gridView: GridView,
     private threeBg: ThreeBackground | null = null,
-    private pixiCanvas: HTMLCanvasElement | null = null
+    private pixiCanvas: HTMLCanvasElement | null = null,
+    private playSfx: (buffer: AudioBuffer | null, volume?: number) => void = () => {},
+    private symbolGlowBuffer: AudioBuffer | null = null,
+    private anchorMoveBuffer: AudioBuffer | null = null
   ) {
     this.overlay = new Container();
     this.dimGraphic = new Graphics();
@@ -406,6 +409,9 @@ export class LoversRevealAnimation {
     const startFemaleX = femaleSprite.x;
     const startFemaleY = femaleSprite.y;
 
+    // Play anchor movement sound
+    this.playSfx(this.anchorMoveBuffer, 0.5);
+
     await tween(700, (t) => {
       // MALE flies in from top-left
       maleSprite.x = startMaleX + (maleTargetX - startMaleX) * t;
@@ -493,8 +499,9 @@ export class LoversRevealAnimation {
           const target = data.targetScales[cell.row];
           if (!sprite || !target) return;
 
-          // Bond cell glow
+          // Bond cell glow + pop sound (same as Fool wild pop)
           this.spawnBondGlow(cell.col, cell.row, step);
+          this.playSfx(this.symbolGlowBuffer, 0.4);
 
           // Pop-in animation
           await tween(popDuration, (t) => {

@@ -114,25 +114,33 @@ A browser-based 5×3 slot game prototype with a unique Tarot card mechanic. Taro
 ---
 
 ### 3.2 Cups (Common Rarity)
-**Theme**: Blessing and transformation
+**Theme**: Fortune and multiplied blessings
 
 **Trigger**: 2+ T_CUPS columns land
 
+**Mechanic**: Multiplier Cell Payout — places multiplier cells on the triggering columns and pays out a direct reward based on the sum of all multiplier values.
+
 **Effect (2 Cups)**:
 1. Remove triggering Cups columns
-2. Scan remaining grid for most common LOW symbol
-   - If tie: use deterministic tie-break (leftmost, then topmost)
-3. Convert **up to 4 instances** of that LOW symbol to PREMIUM
-4. Freed Cups cells reveal PREMIUM symbols only
-5. Evaluate wins
+2. In each freed column, place **1–2 multiplier cells** at random rows
+3. Each multiplier cell receives a value from the pool: **2×, 3×**
+4. Total payout = `sum of all multiplier values × bet amount`
 
 **Effect (3+ Cups)**:
-- Same steps, but convert **up to 7 LOW symbols**
+1. Remove triggering Cups columns
+2. In each freed column, place **2–3 multiplier cells** at random rows
+3. Each multiplier cell receives a value from the pool: **3×, 5×, 10×**
+4. Total payout = `sum of all multiplier values × bet amount`
+
+**Payout Examples** (at €0.20 bet):
+- 2 Cups, 3 cells with values 2+3+2 → 7 × €0.20 = €1.40
+- 3 Cups, 7 cells with values 5+3+10+5+3+5+3 → 34 × €0.20 = €6.80
 
 **Design Notes**:
-- Only LOW symbols are candidates for conversion
-- Premium reveals are random from PREMIUM_POOL
-- Simplest feature—good for initial testing
+- This is a simplified payout model — multiplier cells do not boost individual payline wins passing through them
+- Payout is calculated directly as `totalMultiplierSum × betAmount`
+- Visual animation shows the multiplier cells revealing on the grid before the payout is awarded
+- Future enhancement: integrate per-cell multiplier boosting into the payline evaluator for richer gameplay
 
 ---
 
@@ -408,9 +416,9 @@ Each mode implements:
 - [ ] RNG seed produces consistent results
 
 ### Cups Feature
-- [ ] Correctly identifies most common LOW
-- [ ] Converts exactly 4 (2 Cups) or 7 (3 Cups)
-- [ ] Freed cells show PREMIUM only
+- [ ] Multiplier cells placed correctly on freed columns (1–2 per col for 2 Cups, 2–3 per col for 3 Cups)
+- [ ] Multiplier values drawn from correct pool (2×/3× for 2 Cups, 3×/5×/10× for 3 Cups)
+- [ ] Payout equals totalMultiplierSum × betAmount
 
 ### Fool Feature
 - [ ] Wild cap enforced (max 9)
@@ -486,7 +494,7 @@ T_FOOL, T_CUPS, T_LOVERS, T_PRIESTESS, T_DEATH → Tarot
 ### Feature Trigger Summary
 ```
 T_FOOL       → 2+: Wild reveal + multiplier (×3 or ×5)
-T_CUPS       → 2+: LOW → PREMIUM conversion (4 or 7)
+T_CUPS       → 2+: Multiplier cell payout (2×–10× per cell)
 T_LOVERS     → 2+: Anchor box fill + ×2 (if 2)
 T_PRIESTESS  → 2+: Mystery mode (6 or 9 spins) + ×2 (if 3+)
 T_DEATH      → 2+: Reap mode (10 spins, cluster slash, expand)

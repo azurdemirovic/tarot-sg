@@ -73,7 +73,7 @@ export class GameController {
     this.paylineEvaluator.currentBetAmount = this.betAmount;
 
     // ── Phase 1: generate raw grid (with possible tarot columns) ──
-    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.05);
+    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.071);
     this.currentGrid = initialGrid;
     this.lastTarotColumns = tarotColumns;
 
@@ -99,6 +99,8 @@ export class GameController {
         multiplier = foolResult.multiplier;
       } else if (feature.type === 'T_CUPS') {
         cupsResult = this.featureProcessor.applyCups(finalGrid, feature);
+        // Cups payout = sum of all multiplier cell values × betAmount
+        multiplier = 1; // no spin-level multiplier; payout is direct
       } else if (feature.type === 'T_LOVERS') {
         loversResult = this.featureProcessor.applyLovers(finalGrid, feature);
         multiplier = loversResult.multiplier;
@@ -115,14 +117,23 @@ export class GameController {
 
     // ── Phase 3: evaluate paylines on the *final* grid ──
     // Skip evaluation for Lovers/Priestess/Death — grid transforms are deferred
+    // Skip evaluation for Cups — payout is sum of multiplier cells × bet (no paylines)
     const deferredFeatures = ['T_LOVERS', 'T_PRIESTESS', 'T_DEATH'];
-    const wins = (feature && deferredFeatures.includes(feature.type))
+    const skipPaylines = feature && (deferredFeatures.includes(feature.type) || feature.type === 'T_CUPS');
+    const wins = skipPaylines
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
 
-    const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
-    const totalWin = baseWin * multiplier;
+    let totalWin: number;
+    let baseWin = 0;
+    if (feature && feature.type === 'T_CUPS' && cupsResult) {
+      // Cups: payout = sum of all multiplier cell values × betAmount
+      totalWin = cupsResult.totalMultiplierSum * this.betAmount;
+    } else {
+      baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
+      totalWin = baseWin * multiplier;
+    }
     this.lastWin = totalWin;
     if (feature && !deferredFeatures.includes(feature.type)) {
       this.balance += totalWin;
@@ -215,15 +226,21 @@ export class GameController {
       deathResult = this.featureProcessor.applyDeath(finalGrid, feature);
     }
 
-    // Skip evaluation for deferred features
+    // Skip evaluation for deferred features and Cups
     const deferredFeatures = ['T_LOVERS', 'T_PRIESTESS', 'T_DEATH'];
-    const wins = (feature && deferredFeatures.includes(feature.type))
+    const skipPaylines2 = feature && (deferredFeatures.includes(feature.type) || feature.type === 'T_CUPS');
+    const wins = skipPaylines2
       ? []
       : this.paylineEvaluator.evaluateAllPaylines(finalGrid);
     this.lastWins = wins;
 
-    const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
-    const totalWin = baseWin * multiplier;
+    let totalWin: number;
+    if (feature && feature.type === 'T_CUPS' && cupsResult) {
+      totalWin = cupsResult.totalMultiplierSum * this.betAmount;
+    } else {
+      const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
+      totalWin = baseWin * multiplier;
+    }
     this.lastWin = totalWin;
     if (!feature || !deferredFeatures.includes(feature.type)) {
       this.balance += totalWin;
@@ -383,6 +400,67 @@ export class GameController {
     }
 
     return { spinResult, totalWin };
+  }
+
+  /**
+   * Force a Fool feature with guaranteed big win (debug).
+   * Uses 3 Fool columns (×5 multiplier) and fills remaining cells with ANGEL (highest paying).
+   * The Fool feature will then add max WILDs on top, creating a massive payout.
+   */
+  forceFoolBigWin(columns: number[] = [0, 2, 4]): SpinOutput {
+    this.balance -= this.betAmount;
+    this.paylineEvaluator.currentBetAmount = this.betAmount;
+
+    // Generate a base grid, then force tarots
+    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpinWithTarots('T_FOOL', columns);
+    this.currentGrid = initialGrid;
+    this.lastTarotColumns = tarotColumns;
+
+    const finalGrid: Grid = initialGrid.map(col => col.map(cell => ({ ...cell })));
+
+    // Fill non-tarot cells with ANGEL (highest paying regular symbol)
+    for (let col = 0; col < finalGrid.length; col++) {
+      if (columns.includes(col)) continue; // skip tarot columns
+      for (let row = 0; row < finalGrid[col].length; row++) {
+        finalGrid[col][row] = { col, row, symbolId: 'ANGEL' };
+      }
+    }
+
+    const feature = this.featureProcessor.detectTrigger(tarotColumns);
+    let foolResult: FoolResult | null = null;
+    let multiplier = 1;
+
+    if (feature && feature.type === 'T_FOOL') {
+      foolResult = this.featureProcessor.applyFool(finalGrid, feature);
+      multiplier = foolResult.multiplier;
+    }
+
+    const wins = this.paylineEvaluator.evaluateAllPaylines(finalGrid);
+    this.lastWins = wins;
+
+    const baseWin = wins.reduce((sum, win) => sum + win.payout, 0);
+    const totalWin = baseWin * multiplier;
+    this.lastWin = totalWin;
+    this.balance += totalWin;
+
+    this.isSpinning = false;
+
+    console.log(`🔧 DEBUG: Fool Big Win — ${wins.length} wins, base: ${baseWin.toFixed(2)}, ×${multiplier} = ${totalWin.toFixed(2)} EUR`);
+
+    return {
+      initialGrid,
+      tarotColumns,
+      feature,
+      foolResult,
+      cupsResult: null,
+      loversResult: null,
+      priestessResult: null,
+      deathResult: null,
+      finalGrid,
+      wins,
+      totalWin,
+      multiplier,
+    };
   }
 
   getSeed(): number { return this.rng.getState(); }

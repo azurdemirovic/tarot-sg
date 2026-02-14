@@ -53,6 +53,9 @@ async function init() {
 
     console.log('✅ PixiJS initialized');
 
+    // Enable zIndex sorting on stage
+    app.stage.sortableChildren = true;
+
     // Add canvas to container
     const gameContainer = document.getElementById('game-container');
     if (gameContainer) {
@@ -81,13 +84,15 @@ async function init() {
     // Create grid view
     gridView = new GridView(assetLoader);
     gridView.position.set(105, 105);
+    gridView.zIndex = 10;
     app.stage.addChild(gridView);
 
     console.log('✅ Grid view added to stage');
 
-    // Create payline overlay
+    // Create payline overlay (zIndex > frame's 100 so it renders in front)
     paylineOverlay = new PaylineOverlay();
     paylineOverlay.position.set(105, 105);
+    paylineOverlay.zIndex = 150;
     app.stage.addChild(paylineOverlay);
 
     console.log('✅ Payline overlay added');
@@ -103,10 +108,15 @@ async function init() {
     spinBtn.disabled = false;
     spinBtn.addEventListener('click', handleSpin);
 
-    // Space bar triggers spin
+    // Space bar triggers spin or skips win count-up
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         e.preventDefault();
+        // If win display is counting up, skip to final value
+        if (activeWinDisplay) {
+          activeWinDisplay.requestSkip();
+          return;
+        }
         handleSpin();
       }
     });
@@ -203,6 +213,7 @@ let foolFeatureActive: boolean = false; // Track if Fool feature is currently ru
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
 let loversFeatureActive: boolean = false; // Track if Lovers feature is currently running
 let currentCupsAnimation: CupsRevealAnimation | null = null; // Reference to active Cups animation
+let activeWinDisplay: import('./game/render/WinDisplay').WinDisplay | null = null; // Track active win display for skip
 let currentPriestessAnimation: PriestessRevealAnimation | null = null; // Reference to active Priestess animation
 let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to active Death animation
 let threeBg: ThreeBackground | null = null; // Reference to 3D background
@@ -226,6 +237,11 @@ let loversBackgroundSource: AudioBufferSourceNode | null = null;
 let loversBackgroundGain: GainNode | null = null;
 let deathSlashBuffer: AudioBuffer | null = null;
 let symbolGlowBuffer: AudioBuffer | null = null;
+let tarotFlipBuffer: AudioBuffer | null = null;
+let tarotLandBuffer: AudioBuffer | null = null;
+let paylineWinBuffer: AudioBuffer | null = null;
+let winCountUpBuffer: AudioBuffer | null = null;
+let anchorMoveBuffer: AudioBuffer | null = null;
 
 async function loadSfxBuffer(url: string): Promise<AudioBuffer | null> {
   try {
@@ -255,6 +271,14 @@ async function preloadSoundEffects(): Promise<void> {
     // Placeholder sounds
     deathSlashBuffer = await loadSfxBuffer('/assets/sound/death-slash.wav');
     symbolGlowBuffer = await loadSfxBuffer('/assets/sound/symbol-glow.wav');
+    // Tarot & payline sounds
+    tarotFlipBuffer = await loadSfxBuffer('/assets/sound/tarot-flip.wav');
+    tarotLandBuffer = await loadSfxBuffer('/assets/sound/tarot-land.wav');
+    paylineWinBuffer = await loadSfxBuffer('/assets/sound/payline-win.wav');
+    // Win count-up loop sound
+    winCountUpBuffer = await loadSfxBuffer('/assets/sound/win-countup.wav');
+    // Lovers anchor movement sound
+    anchorMoveBuffer = await loadSfxBuffer('/assets/sound/anchor-move.wav');
     console.log('🔊 Sound effects preloaded');
   } catch (e) {
     console.warn('🔊 Could not preload sound effects:', e);
@@ -273,48 +297,80 @@ function playSfx(buffer: AudioBuffer | null, volume: number = 0.6): void {
   src.start(0);
 }
 
-/** Stop default background music (for feature-specific BG music swap) */
-function stopBgMusic(): void {
-  if (bgMusicSource) {
-    try { bgMusicSource.stop(); } catch (_) { /* already stopped */ }
+/** Fade out and stop default background music (for feature-specific BG music swap) */
+function stopBgMusic(fadeDuration: number = 0.8): Promise<void> {
+  return new Promise(resolve => {
+    if (!bgMusicGain || !bgMusicSource || !bgMusicContext) {
+      resolve();
+      return;
+    }
+    const now = bgMusicContext.currentTime;
+    bgMusicGain.gain.setValueAtTime(bgMusicGain.gain.value, now);
+    bgMusicGain.gain.linearRampToValueAtTime(0, now + fadeDuration);
+    const src = bgMusicSource;
     bgMusicSource = null;
-  }
-  console.log('🎵 Default background music stopped');
+    setTimeout(() => {
+      try { src.stop(); } catch (_) { /* already stopped */ }
+      resolve();
+    }, fadeDuration * 1000 + 50);
+    console.log(`🎵 Default background music fading out (${fadeDuration}s)`);
+  });
 }
 
-/** Restart default background music after a feature ends */
-function restartBgMusic(): void {
+/** Restart default background music after a feature ends (with fade in) */
+function restartBgMusic(fadeDuration: number = 1.0): void {
   if (!bgMusicContext || !bgMusicBuffer || !bgMusicGain) return;
   bgMusicSource = bgMusicContext.createBufferSource();
   bgMusicSource.buffer = bgMusicBuffer;
   bgMusicSource.loop = true;
   bgMusicSource.connect(bgMusicGain);
+  // Fade in from 0 to target volume
+  const targetVolume = 0.35;
+  const now = bgMusicContext.currentTime;
+  bgMusicGain.gain.setValueAtTime(0, now);
+  bgMusicGain.gain.linearRampToValueAtTime(targetVolume, now + fadeDuration);
   bgMusicSource.start(0);
-  console.log('🎵 Default background music restarted');
+  console.log(`🎵 Default background music fading in (${fadeDuration}s)`);
 }
 
-/** Start Lovers background music (looping) */
-function startLoversBackground(): void {
+/** Start Lovers background music (looping, with fade in) */
+function startLoversBackground(fadeDuration: number = 1.0): void {
   if (!sfxContext || !loversBackgroundBuffer) return;
   loversBackgroundGain = sfxContext.createGain();
-  loversBackgroundGain.gain.value = 0.35;
+  const targetVolume = 0.35;
+  const now = sfxContext.currentTime;
+  loversBackgroundGain.gain.setValueAtTime(0, now);
+  loversBackgroundGain.gain.linearRampToValueAtTime(targetVolume, now + fadeDuration);
   loversBackgroundGain.connect(sfxContext.destination);
   loversBackgroundSource = sfxContext.createBufferSource();
   loversBackgroundSource.buffer = loversBackgroundBuffer;
   loversBackgroundSource.loop = true;
   loversBackgroundSource.connect(loversBackgroundGain);
   loversBackgroundSource.start(0);
-  console.log('🎵 Lovers background music started');
+  console.log(`🎵 Lovers background music fading in (${fadeDuration}s)`);
 }
 
-/** Stop Lovers background music */
-function stopLoversBackground(): void {
-  if (loversBackgroundSource) {
-    try { loversBackgroundSource.stop(); } catch (_) { /* already stopped */ }
+/** Stop Lovers background music (with fade out) */
+function stopLoversBackground(fadeDuration: number = 0.8): Promise<void> {
+  return new Promise(resolve => {
+    if (!loversBackgroundSource || !loversBackgroundGain || !sfxContext) {
+      resolve();
+      return;
+    }
+    const now = sfxContext.currentTime;
+    loversBackgroundGain.gain.setValueAtTime(loversBackgroundGain.gain.value, now);
+    loversBackgroundGain.gain.linearRampToValueAtTime(0, now + fadeDuration);
+    const src = loversBackgroundSource;
+    const gain = loversBackgroundGain;
     loversBackgroundSource = null;
     loversBackgroundGain = null;
-  }
-  console.log('🎵 Lovers background music stopped');
+    setTimeout(() => {
+      try { src.stop(); } catch (_) { /* already stopped */ }
+      gain.disconnect();
+      resolve();
+    }, fadeDuration * 1000 + 50);
+    console.log(`🎵 Lovers background music fading out (${fadeDuration}s)`);
+  });
 }
 
 function resetState() {
@@ -394,6 +450,10 @@ async function handleSpin() {
     console.log('🔧 DEBUG: Forcing Death feature (first spin only)');
     hasSpunOnce = true;
     spinOutput = gameController.forceTarotSpin('T_DEATH', DEBUG.DEATH_COLUMNS);
+  } else if (!hasSpunOnce && DEBUG.FORCE_FOOL_BIG_WIN) {
+    console.log('🔧 DEBUG: Forcing Fool BIG WIN feature (first spin only)');
+    hasSpunOnce = true;
+    spinOutput = gameController.forceFoolBigWin(DEBUG.FOOL_BIG_WIN_COLUMNS);
   } else if (!hasSpunOnce && DEBUG.FORCE_FOOL) {
     console.log('🔧 DEBUG: Forcing Fool feature (first spin only)');
     hasSpunOnce = true;
@@ -416,13 +476,22 @@ async function handleSpin() {
 
   try {
     // ── Phase 1: Spin & land the INITIAL grid (cardbacks shown for tarot columns) ──
+    // Set up tarot land sound callback before spinning
+    const tarotColSet = new Set(spinOutput.tarotColumns.map(tc => tc.col));
+    gridView.setOnReelLand((col: number) => {
+      if (tarotColSet.has(col)) {
+        playSfx(tarotLandBuffer, 0.5);
+      }
+    });
     await gridView.spinToGrid(spinOutput.initialGrid, spinOutput.tarotColumns);
+    gridView.setOnReelLand(null); // Clear callback after spin completes
 
     // ── Phase 1.5: Flip cardbacks to reveal tarot faces ──
     if (spinOutput.tarotColumns.length > 0) {
       canSkip = false; // Disable hurry-up during reveal
       spinBtn.disabled = true; // Lock button during reveal sequence
       await delay(400); // Suspense pause — player sees cardbacks
+      playSfx(tarotFlipBuffer, 0.5); // Play tarot flip sound as cards reveal
       await gridView.flipTarotColumns(spinOutput.tarotColumns);
       await delay(300); // Brief pause to admire revealed tarots
 
@@ -434,8 +503,8 @@ async function handleSpin() {
           case 'T_CUPS':      playSfx(cupsTriggerBuffer, 0.6); break;
           case 'T_LOVERS':
             playSfx(loversTriggerBuffer, 0.6);
-            stopBgMusic();
-            startLoversBackground();
+            // Slowly fade out bg music over 2s, then fade in lovers music over 2s
+            stopBgMusic(2.0).then(() => startLoversBackground(2.0));
             break;
           case 'T_PRIESTESS': playSfx(priestessTriggerBuffer, 0.6); break;
           case 'T_DEATH':     playSfx(deathTriggerBuffer, 0.6); break;
@@ -617,7 +686,10 @@ async function handleSpin() {
         gridView.getRows(),
         gridView,
         threeBg,
-        app.canvas as HTMLCanvasElement
+        app.canvas as HTMLCanvasElement,
+        playSfx,
+        symbolGlowBuffer,
+        anchorMoveBuffer
       );
 
       const feature = spinOutput.feature;
@@ -648,8 +720,9 @@ async function handleSpin() {
         gameController.betAmount
       );
       loversFeatureActive = false;
-      stopLoversBackground();
-      restartBgMusic();
+      // Slowly fade out lovers music over 2s, then fade in default bg music over 2s
+      await stopLoversBackground(2.0);
+      restartBgMusic(2.0);
       threeBg?.clearFeatureColor();
       playSfx(modelDespawnBuffer, 0.6);
       await threeBg?.restoreLovers();
@@ -733,6 +806,7 @@ async function handleSpin() {
 
     if (currentSpinData && currentSpinData.wins.length > 0 && !skipWinDisplay) {
       // First: radiate outlines on winning symbols
+      playSfx(paylineWinBuffer, 0.4); // Play payline win sound
       paylineOverlay.showWinningPaylines(currentSpinData.wins, gridView.getReelSpinners());
       await delay(1000); // Let the radiating outline animation play fully
 
@@ -743,8 +817,14 @@ async function handleSpin() {
       const totalWidth = gridView.getCols() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
       const totalHeight = gridView.getRows() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
       const { WinDisplay } = await import('./game/render/WinDisplay');
-      const winDisplay = new WinDisplay(gridView);
-      await winDisplay.show(
+      const winDisplayInstance = new WinDisplay(gridView);
+      winDisplayInstance.setSoundOptions({
+        playSfx,
+        countUpBuffer: winCountUpBuffer,
+        sfxContext,
+      });
+      activeWinDisplay = winDisplayInstance;
+      await winDisplayInstance.show(
         currentSpinData.wins,
         currentSpinData.multiplier,
         currentSpinData.totalWin,
@@ -752,6 +832,7 @@ async function handleSpin() {
         totalWidth,
         totalHeight
       );
+      activeWinDisplay = null;
     }
 
     // ── Phase 3: Show results ──

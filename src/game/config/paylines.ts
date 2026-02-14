@@ -1,220 +1,72 @@
 /**
- * Paylines Configuration - 25 Paylines
- * Each payline must have exactly 5 asterisks (one per reel)
+ * Paylines Configuration — 25 Unique Paylines
+ *
+ * Each payline is a 5-element array of row indices [r0, r1, r2, r3, r4],
+ * one per reel (column 0–4).  Row 0 = top, 1 = middle, 2 = bottom.
+ *
+ * All 25 sequences are verified unique.
  */
 
-const NOTATED_PAYLINES = [
-  // === Straight Lines (3) ===
-  `
-  -----
-  *****
-  -----
-  `, // 1: Middle straight
-  
-  `
-  *****
-  -----
-  -----
-  `, // 2: Top straight
-  
-  `
-  -----
-  -----
-  *****
-  `, // 3: Bottom straight
+const paylines: number[][] = [
+  // --- Straight lines (3) ---
+  [1, 1, 1, 1, 1], //  1  Middle straight
+  [0, 0, 0, 0, 0], //  2  Top straight
+  [2, 2, 2, 2, 2], //  3  Bottom straight
 
-  // === V-Shapes (2) ===
-  `
-  *---*
-  -*-*-
-  --*--
-  `, // 4: V shape
-  
-  `
-  --*--
-  -*-*-
-  *---*
-  `, // 5: Inverted V
+  // --- V shapes (2) ---
+  [0, 1, 2, 1, 0], //  4  V down
+  [2, 1, 0, 1, 2], //  5  V up (inverted V)
 
-  // === Zigzag Patterns (4) ===
-  `
-  *-*-*
-  -*-*-
-  -----
-  `, // 6: Top zigzag
-  
-  `
-  -----
-  -*-*-
-  *-*-*
-  `, // 7: Bottom zigzag
-  
-  `
-  -*-*-
-  *-*-*
-  -----
-  `, // 8: Top wave
-  
-  `
-  -----
-  *-*-*
-  -*-*-
-  `, // 9: Bottom wave
+  // --- Zigzags (4) ---
+  [0, 1, 0, 1, 0], //  6  Top zigzag
+  [2, 1, 2, 1, 2], //  7  Bottom zigzag
+  [1, 0, 1, 0, 1], //  8  Mid-top zigzag
+  [1, 2, 1, 2, 1], //  9  Mid-bottom zigzag
 
-  // === W and M Shapes (2) ===
-  `
-  *-*-*
-  -----
-  -*-*-
-  `, // 10: W shape
-  
-  `
-  -*-*-
-  -----
-  *-*-*
-  `, // 11: M shape
+  // --- W / M (2) ---
+  [0, 2, 0, 2, 0], // 10  W shape
+  [2, 0, 2, 0, 2], // 11  M shape
 
-  // === Complex Patterns (14) ===
-  `
-  *---*
-  -*-*-
-  --*--
-  `, // 12: U shape
-  
-  `
-  --*--
-  -*-*-
-  *---*
-  `, // 13: Inverted U
-  
-  `
-  *-*-*
-  -*-*-
-  --*--
-  `, // 14: Top heavy
-  
-  `
-  --*--
-  -*-*-
-  *-*-*
-  `, // 15: Bottom heavy
-  
-  `
-  *-*-*
-  -----
-  -*-*-
-  `, // 16: Repeat W
-  
-  `
-  -*-*-
-  -----
-  *-*-*
-  `, // 17: Repeat M
-  
-  `
-  *-*-*
-  -*-*-
-  --*--
-  `, // 18: Pattern A
-  
-  `
-  --*--
-  -*-*-
-  *-*-*
-  `, // 19: Pattern B
-  
-  `
-  *-*-*
-  -----
-  -*-*-
-  `, // 20: Pattern C
-  
-  `
-  -*-*-
-  -----
-  *-*-*
-  `, // 21: Pattern D
-  
-  `
-  *-*-*
-  -*-*-
-  -*-*-
-  `, // 22: Double middle
-  
-  `
-  -*-*-
-  -*-*-
-  *-*-*
-  `, // 23: Triple middle
-  
-  `
-  *-*-*
-  -*-*-
-  *-*-*
-  `, // 24: All outer
-  
-  `
-  -*-*-
-  *-*-*
-  -*-*-
-  `, // 25: Alternating
+  // --- Steps (4) ---
+  [0, 0, 1, 1, 2], // 12  Step down
+  [2, 2, 1, 1, 0], // 13  Step up
+  [0, 1, 1, 2, 2], // 14  Staircase down
+  [2, 1, 1, 0, 0], // 15  Staircase up
+
+  // --- Bumps (4) ---
+  [1, 0, 1, 2, 2], // 16  Bump down-right
+  [1, 2, 1, 0, 0], // 17  Bump up-right
+  [2, 2, 1, 0, 1], // 18  Bump down-left
+  [0, 0, 1, 2, 1], // 19  Bump up-left
+
+  // --- Arches (2) ---
+  [0, 1, 1, 1, 2], // 20  Arch down
+  [2, 1, 1, 1, 0], // 21  Arch up
+
+  // --- Slides (2) ---
+  [0, 1, 2, 0, 0], // 22  Slide right
+  [2, 1, 0, 2, 2], // 23  Slide left
+
+  // --- Flat-dip (2) ---
+  [0, 0, 1, 0, 0], // 24  Top dip
+  [2, 2, 1, 2, 2], // 25  Bottom dip
 ];
 
-/**
- * Convert payline notation to row sequence
- */
-function convertToRowSequence(line: string): number[] {
-  const rows = getRows(line);
-  const columns = rows[0].length;
-  const sequence: number[] = [];
-  
-  for (let column = 0; column < columns; column++) {
-    const rowIndex = rows.findIndex((row) => row[column] === '*');
-    if (rowIndex === -1) {
-      throw new Error(`Payline column ${column} has no asterisk marker`);
-    }
-    sequence.push(rowIndex);
-  }
-  
-  if (sequence.length !== 5) {
-    throw new Error(`Payline must have exactly 5 columns, got ${sequence.length}`);
-  }
-  
-  return sequence;
+// --- Validation ---
+if (paylines.length !== 25) {
+  throw new Error(`Expected 25 paylines, got ${paylines.length}`);
 }
 
-/**
- * Split payline into rows
- */
-function getRows(line: string): string[] {
-  const rows = line
-    .split('\n')
-    .map((row) => row.trim())
-    .filter(Boolean);
-  
-  if (rows.length !== 3) {
-    throw new Error(`Payline must have exactly 3 rows, got ${rows.length}`);
-  }
-  
-  return rows;
-}
-
-// Convert all paylines
-const paylines: number[][] = NOTATED_PAYLINES.map((line, index) => {
-  try {
-    return convertToRowSequence(line);
-  } catch (error) {
-    throw new Error(`Error in payline ${index + 1}: ${error}`);
-  }
+// Check uniqueness
+const seen = new Set<string>();
+paylines.forEach((pl, i) => {
+  if (pl.length !== 5) throw new Error(`Payline ${i + 1} has ${pl.length} entries, expected 5`);
+  if (pl.some(r => r < 0 || r > 2)) throw new Error(`Payline ${i + 1} has invalid row index`);
+  const key = pl.join(',');
+  if (seen.has(key)) throw new Error(`Payline ${i + 1} is a duplicate: [${key}]`);
+  seen.add(key);
 });
 
-// Validate
-paylines.forEach((payline, index) => {
-  if (payline.some(row => row < 0 || row > 2)) {
-    throw new Error(`Payline ${index + 1} contains invalid row index`);
-  }
-});
-
-console.log(`✅ Loaded ${paylines.length} paylines`);
+console.log(`✅ Loaded ${paylines.length} unique paylines`);
 
 export default paylines;
