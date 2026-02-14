@@ -98,7 +98,6 @@ export class DeathRevealAnimation {
       let isFirstSpin = true;
       while (deathResult.spinsRemaining > 0) {
         const spinNum = deathResult.spinsTotal - deathResult.spinsRemaining + 1;
-        console.log(`💀 Death Spin ${spinNum}/${deathResult.spinsTotal}`);
 
         // Show spin counter
         await this.showSpinCounter(spinNum, deathResult.spinsTotal, totalWidth);

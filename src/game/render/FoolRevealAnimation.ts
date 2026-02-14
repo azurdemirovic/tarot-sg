@@ -1,11 +1,11 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { FoolResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-import { tween, wait, easeOutCubic, easeInOutQuad, linear } from '../utils/AnimationUtils';
+import { tween, wait, easeOutCubic, easeInOutQuad, linear, spawnDarkParticleGlow } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
@@ -187,67 +187,9 @@ export class FoolRevealAnimation {
     if (allDone.length > 0) await wait(300);
   }
 
-  // ── Spawn dark, diffuse particle-like glow behind a WILD cell ──
-  private spawnWildGlow(col: number, row: number, step: number): void {
+  private spawnWildGlow(col: number, row: number, _step: number): void {
     soundManager.play('symbol-glow', 0.4);
-    const cx = col * step + this.cellSize / 2;
-    const cy = row * step + this.cellSize / 2;
-
-    const glowGroup = new Container();
-    glowGroup.x = cx;
-    glowGroup.y = cy;
-    this.glowContainer.addChild(glowGroup);
-
-    // Spawn several soft particle blobs at random offsets for a diffuse, smoky look
-    const particleCount = 8;
-    const particles: { g: Graphics; offsetX: number; offsetY: number; baseRadius: number; speed: number; phase: number }[] = [];
-
-    for (let i = 0; i < particleCount; i++) {
-      const g = new Graphics();
-      glowGroup.addChild(g);
-      const angle = (i / particleCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
-      const dist = this.cellSize * (0.05 + Math.random() * 0.15);
-      particles.push({
-        g,
-        offsetX: Math.cos(angle) * dist,
-        offsetY: Math.sin(angle) * dist,
-        baseRadius: this.cellSize * (0.15 + Math.random() * 0.2),
-        speed: 0.7 + Math.random() * 0.6,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-
-    // Animate: particles expand outward, pulse softly, then fade
-    tween(700, (t) => {
-      for (const p of particles) {
-        p.g.clear();
-        const life = t * p.speed;
-        const expand = 0.5 + life * 0.8;
-        const radius = p.baseRadius * expand;
-        const drift = t * 1.3;
-
-        // Fade in quickly, hold, then fade out
-        let alpha: number;
-        if (t < 0.15) {
-          alpha = (t / 0.15) * 0.4;
-        } else if (t < 0.5) {
-          alpha = 0.4 - (t - 0.15) * 0.15;
-        } else {
-          alpha = 0.35 * (1 - (t - 0.5) / 0.5) * 0.6;
-        }
-
-        const px = p.offsetX * drift + Math.sin(p.phase + t * 4) * 2;
-        const py = p.offsetY * drift + Math.cos(p.phase + t * 3) * 2;
-
-        // Draw multiple concentric circles for soft falloff
-        p.g.circle(px, py, radius);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.3 });
-        p.g.circle(px, py, radius * 0.65);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.5 });
-        p.g.circle(px, py, radius * 0.3);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.7 });
-      }
-    }, easeOutCubic);
+    spawnDarkParticleGlow(this.glowContainer, col, row, this.cellSize, this.padding);
   }
 
   // ── Tear down all temporary display objects ──────────────

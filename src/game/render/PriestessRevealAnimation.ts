@@ -102,7 +102,6 @@ export class PriestessRevealAnimation {
       let isFirstSpin = true;
       while (priestessResult.spinsRemaining > 0) {
         const spinNum = priestessResult.spinsTotal - priestessResult.spinsRemaining + 1;
-        console.log(`🔮 Priestess Spin ${spinNum}/${priestessResult.spinsTotal}`);
 
         // Show spin counter
         await this.showSpinCounter(spinNum, priestessResult.spinsTotal, totalWidth);

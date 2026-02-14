@@ -34,7 +34,6 @@ export class ReelSpinner extends Container {
       const arrayBuffer = await response.arrayBuffer();
       ReelSpinner.landAudioBuffer = await ReelSpinner.landAudioContext.decodeAudioData(arrayBuffer);
       ReelSpinner.landSoundLoaded = true;
-      console.log('🔊 Reel land sound loaded');
     } catch (e) {
       console.warn('🔊 Could not load land sound:', e);
     }
@@ -172,7 +171,7 @@ export class ReelSpinner extends Container {
   skipToResult(): void {
     // Fast-forward to target position without bounce
     if (this.isSpinning) {
-      console.log('⚡ ReelSpinner: Snapping to result position');
+      
       this.scrollOffset = this.targetOffset;
       this.isSpinning = false;
       this.bouncing = false;
@@ -182,7 +181,7 @@ export class ReelSpinner extends Container {
   
   triggerBounce(intensity: number = 1.0): void {
     if (!this.bouncing) {
-      console.log('🎪 ReelSpinner: Starting bounce with intensity', intensity);
+      
       this.startBounce(intensity);
     }
   }

@@ -195,6 +195,26 @@ let currentPriestessAnimation: PriestessRevealAnimation | null = null; // Refere
 let currentDeathAnimation: DeathRevealAnimation | null = null; // Reference to active Death animation
 let threeBg: ThreeBackground | null = null;
 
+/** Wraps a feature animation with 3D model swap, color tinting, and column restore. */
+async function runFeature(
+  featureType: string,
+  swapIn: () => Promise<void>,
+  swapOut: () => Promise<void>,
+  body: () => Promise<void>,
+  options?: { skipRestore?: boolean }
+): Promise<void> {
+  threeBg?.setFeatureColor(featureType);
+  soundManager.play('model-spawn', 0.6);
+  await swapIn();
+  await body();
+  if (!options?.skipRestore) {
+    threeBg?.clearFeatureColor();
+    soundManager.play('model-despawn', 0.6);
+    await swapOut();
+    gridView.restoreAllColumnsVisible();
+  }
+}
+
 function resetState() {
   currentState = SpinState.IDLE;
   canSkip = false;
@@ -342,269 +362,155 @@ async function handleSpin() {
       await titleDisplay.show(spinOutput.feature.type, 400, 1000, 400, gridCenter);
     }
 
-    // ── Phase 2: If a Fool feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_FOOL' && spinOutput.foolResult) {
       foolFeatureActive = true;
-      spinBtn.disabled = true; // Lock button during reveal
-      threeBg?.setFeatureColor('T_FOOL');
-
-      // Swap 3D model to nightmare jester
-      soundManager.play('model-spawn', 0.6);
-      await threeBg?.swapToModel();
-
-      const foolReveal = new FoolRevealAnimation(
-        gridView,
-        gridView.getReelSpinners(),
-        assetLoader,
-        gridView.getCellSize(),
-        gridView.getPadding(),
-        gridView.getCols(),
-        gridView.getRows(),
-        threeBg,
-        app.canvas as HTMLCanvasElement,
+      spinBtn.disabled = true;
+      await runFeature('T_FOOL',
+        () => threeBg?.swapToModel() ?? Promise.resolve(),
+        () => threeBg?.restoreModel() ?? Promise.resolve(),
+        async () => {
+          const foolReveal = new FoolRevealAnimation(
+            gridView, gridView.getReelSpinners(), assetLoader,
+            gridView.getCellSize(), gridView.getPadding(),
+            gridView.getCols(), gridView.getRows(),
+            threeBg, app.canvas as HTMLCanvasElement,
+          );
+          await foolReveal.play(
+            spinOutput.feature!, spinOutput.foolResult!,
+            spinOutput.finalGrid, spinOutput.multiplier,
+            spinOutput.wins, spinOutput.totalWin, gameController.betAmount
+          );
+        }
       );
-
-      await foolReveal.play(
-        spinOutput.feature,
-        spinOutput.foolResult,
-        spinOutput.finalGrid,
-        spinOutput.multiplier,
-        spinOutput.wins,
-        spinOutput.totalWin,
-        gameController.betAmount
-      );
-
       foolFeatureActive = false;
-      threeBg?.clearFeatureColor();
-      soundManager.play('model-despawn', 0.6);
-      await threeBg?.restoreModel();
     }
 
-    // ── Phase 2b: If a Cups feature triggered, play the multiplier collection animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_CUPS' && spinOutput.cupsResult) {
-      spinBtn.disabled = false; // Allow clicking to speed up Cups spins
-      cupsFeatureActive = true; // Mark Cups as active
-      threeBg?.setFeatureColor('T_CUPS');
-
-      // Swap 3D model to sol (drops in from above)
-      soundManager.play('model-spawn', 0.6);
-      await threeBg?.swapToSol();
-
-      const cupsReveal = new CupsRevealAnimation(
-        gridView,
-        gridView.getReelSpinners(),
-        assetLoader,
-        gridView.getCellSize(),
-        gridView.getPadding(),
-        gridView.getCols(),
-        gridView.getRows(),
-        gameController.getCurrentSeed(),
-        threeBg,
-        app.canvas as HTMLCanvasElement
+      spinBtn.disabled = false;
+      cupsFeatureActive = true;
+      let cupsPayout = 0;
+      await runFeature('T_CUPS',
+        () => threeBg?.swapToSol() ?? Promise.resolve(),
+        () => threeBg?.restoreSol() ?? Promise.resolve(),
+        async () => {
+          const cupsReveal = new CupsRevealAnimation(
+            gridView, gridView.getReelSpinners(), assetLoader,
+            gridView.getCellSize(), gridView.getPadding(),
+            gridView.getCols(), gridView.getRows(),
+            gameController.getCurrentSeed(),
+            threeBg, app.canvas as HTMLCanvasElement
+          );
+          currentCupsAnimation = cupsReveal;
+          cupsPayout = await cupsReveal.play(
+            spinOutput.feature!, spinOutput.cupsResult!, gameController.betAmount
+          );
+        }
       );
-      
-      currentCupsAnimation = cupsReveal; // Store reference for skip functionality
-
-      const cupsPayout = await cupsReveal.play(
-        spinOutput.feature,
-        spinOutput.cupsResult,
-        gameController.betAmount
-      );
-
-      // Cups feature finished
       cupsFeatureActive = false;
       currentCupsAnimation = null;
-      threeBg?.clearFeatureColor();
-      soundManager.play('model-despawn', 0.6);
-      await threeBg?.restoreSol();
-
-      // Restore all reel columns to visible
-      for (let col = 0; col < gridView.getCols(); col++) {
-        gridView.getReelSpinners()[col].setColumnVisible(true);
-      }
-
-      // Update balance with Cups payout
       gameController.balance += cupsPayout;
       gameController.lastWin = cupsPayout;
       currentSpinData.totalWin = cupsPayout;
     }
 
-    // ── Phase 2c: If a Priestess feature triggered, play the mystery reveal ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_PRIESTESS' && spinOutput.priestessResult) {
-      spinBtn.disabled = false; // Allow spin button for hurry-up during reel spins
+      spinBtn.disabled = false;
       priestessFeatureActive = true;
-      threeBg?.setFeatureColor('T_PRIESTESS');
-
-      // Swap 3D model to queen of swords (scales up)
-      soundManager.play('model-spawn', 0.6);
-      await threeBg?.swapToQueen();
-
-      const priestessReveal = new PriestessRevealAnimation(
-        gridView,
-        gridView.getReelSpinners(),
-        assetLoader,
-        gridView.getCellSize(),
-        gridView.getPadding(),
-        gridView.getCols(),
-        gridView.getRows(),
-        gridView,
-        threeBg,
-        app.canvas as HTMLCanvasElement,
-      );
-
-      currentPriestessAnimation = priestessReveal; // Store reference for hurry-up
-
+      let priestessPayout = 0;
       const priestessResult = spinOutput.priestessResult;
-
-      const priestessPayout = await priestessReveal.play(
-        spinOutput.feature,
-        priestessResult,
-        () => {
-          return gameController.generateFreshGrid();
-        },
-        (grid, existingMysteryCells) => {
-          return gameController.applyPriestessSpin(grid, priestessResult, existingMysteryCells);
-        },
-        gameController.betAmount
+      await runFeature('T_PRIESTESS',
+        () => threeBg?.swapToQueen() ?? Promise.resolve(),
+        () => threeBg?.restoreQueen() ?? Promise.resolve(),
+        async () => {
+          const priestessReveal = new PriestessRevealAnimation(
+            gridView, gridView.getReelSpinners(), assetLoader,
+            gridView.getCellSize(), gridView.getPadding(),
+            gridView.getCols(), gridView.getRows(),
+            gridView, threeBg, app.canvas as HTMLCanvasElement,
+          );
+          currentPriestessAnimation = priestessReveal;
+          priestessPayout = await priestessReveal.play(
+            spinOutput.feature!, priestessResult,
+            () => gameController.generateFreshGrid(),
+            (grid, cells) => gameController.applyPriestessSpin(grid, priestessResult, cells),
+            gameController.betAmount
+          );
+        }
       );
-
       priestessFeatureActive = false;
       currentPriestessAnimation = null;
-      threeBg?.clearFeatureColor();
-      soundManager.play('model-despawn', 0.6);
-      await threeBg?.restoreQueen();
-
-      // Restore all reel columns to visible
-      for (let col = 0; col < gridView.getCols(); col++) {
-        gridView.getReelSpinners()[col].setColumnVisible(true);
-      }
-
-      // Apply total payout to balance at the end (per-spin was notification only)
       gameController.balance += priestessPayout;
       gameController.lastWin = priestessPayout;
       currentSpinData.totalWin = priestessPayout;
     }
 
-    // ── Phase 2d: If a Lovers feature triggered, play the reveal animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_LOVERS' && spinOutput.loversResult) {
       spinBtn.disabled = true;
       loversFeatureActive = true;
-      threeBg?.setFeatureColor('T_LOVERS');
-      soundManager.play('model-spawn', 0.6);
-      await threeBg?.swapToLovers();
-
-      const loversReveal = new LoversRevealAnimation(
-        gridView,
-        gridView.getReelSpinners(),
-        assetLoader,
-        gridView.getCellSize(),
-        gridView.getPadding(),
-        gridView.getCols(),
-        gridView.getRows(),
-        gridView,
-        threeBg,
-        app.canvas as HTMLCanvasElement,
-      );
-
-      const feature = spinOutput.feature;
-      const loversResult = spinOutput.loversResult;
-      let finalGrid = spinOutput.finalGrid;
-
-      await loversReveal.play(
-        feature,
-        loversResult,
-        (selectedIndex: number) => {
-          // Player picked a card — apply the bond fill to the current fresh grid
-          const result = gameController.applyLoversSelection(
-            finalGrid, feature, loversResult, selectedIndex
+      await runFeature('T_LOVERS',
+        () => threeBg?.swapToLovers() ?? Promise.resolve(),
+        () => threeBg?.restoreLovers() ?? Promise.resolve(),
+        async () => {
+          const loversReveal = new LoversRevealAnimation(
+            gridView, gridView.getReelSpinners(), assetLoader,
+            gridView.getCellSize(), gridView.getPadding(),
+            gridView.getCols(), gridView.getRows(),
+            gridView, threeBg, app.canvas as HTMLCanvasElement,
           );
-          // Update spinOutput with the new results
-          finalGrid = result.finalGrid;
-          currentSpinData!.finalGrid = result.finalGrid;
-          currentSpinData!.wins = result.wins;
-          currentSpinData!.totalWin = result.totalWin;
-          currentSpinData!.multiplier = result.multiplier;
-          return result;
-        },
-        () => {
-          // Generate a fresh grid for each Lovers spin
-          finalGrid = gameController.generateFreshGrid();
-          return finalGrid;
-        },
-        gameController.betAmount
+          const feature = spinOutput.feature!;
+          const loversResult = spinOutput.loversResult!;
+          let finalGrid = spinOutput.finalGrid;
+          await loversReveal.play(feature, loversResult,
+            (selectedIndex: number) => {
+              const result = gameController.applyLoversSelection(
+                finalGrid, feature, loversResult, selectedIndex
+              );
+              finalGrid = result.finalGrid;
+              currentSpinData!.finalGrid = result.finalGrid;
+              currentSpinData!.wins = result.wins;
+              currentSpinData!.totalWin = result.totalWin;
+              currentSpinData!.multiplier = result.multiplier;
+              return result;
+            },
+            () => { finalGrid = gameController.generateFreshGrid(); return finalGrid; },
+            gameController.betAmount
+          );
+          loversFeatureActive = false;
+          await soundManager.stopFeatureMusic(2.0);
+          soundManager.restartBgMusic(0.35, 2.0);
+        }
       );
-      loversFeatureActive = false;
-      // Slowly fade out lovers music over 2s, then fade in default bg music over 2s
-      await soundManager.stopFeatureMusic(2.0);
-      soundManager.restartBgMusic(0.35, 2.0);
-      threeBg?.clearFeatureColor();
-      soundManager.play('model-despawn', 0.6);
-      await threeBg?.restoreLovers();
-
-      // Restore all reel columns to visible after Lovers
-      for (let col = 0; col < gridView.getCols(); col++) {
-        gridView.getReelSpinners()[col].setColumnVisible(true);
-      }
     }
 
-    // ── Phase 2e: If a Death feature triggered, play the reaping animation ──
     if (spinOutput.feature && spinOutput.feature.type === 'T_DEATH' && spinOutput.deathResult) {
-      spinBtn.disabled = false; // Allow spin button for hurry-up during reel spins
+      spinBtn.disabled = false;
       deathFeatureActive = true;
-      threeBg?.setFeatureColor('T_DEATH');
-
-      // Bring in the Death 3D model
-      soundManager.play('model-spawn', 0.6);
-      await threeBg?.swapToDeath();
-
-      const deathReveal = new DeathRevealAnimation(
-        gridView,
-        gridView.getReelSpinners(),
-        assetLoader,
-        gridView.getCellSize(),
-        gridView.getPadding(),
-        gridView.getCols(),
-        gridView.getRows(),
-        gridView,
-        threeBg,
-        app.canvas as HTMLCanvasElement,
-      );
-
-      currentDeathAnimation = deathReveal;
-
+      let deathPayout = 0;
       const deathResult = spinOutput.deathResult;
-
-      const deathPayout = await deathReveal.play(
-        spinOutput.feature,
-        deathResult,
-        (cols, rows, stickyWilds) => {
-          return gameController.generateDeathGrid(cols, rows, stickyWilds);
+      await runFeature('T_DEATH',
+        () => threeBg?.swapToDeath() ?? Promise.resolve(),
+        () => threeBg?.restoreDeath() ?? Promise.resolve(),
+        async () => {
+          const deathReveal = new DeathRevealAnimation(
+            gridView, gridView.getReelSpinners(), assetLoader,
+            gridView.getCellSize(), gridView.getPadding(),
+            gridView.getCols(), gridView.getRows(),
+            gridView, threeBg, app.canvas as HTMLCanvasElement,
+          );
+          currentDeathAnimation = deathReveal;
+          deathPayout = await deathReveal.play(
+            spinOutput.feature!, deathResult,
+            (cols, rows, stickyWilds) => gameController.generateDeathGrid(cols, rows, stickyWilds),
+            (grid, dr) => gameController.applyDeathSpin(grid, dr),
+            gameController.betAmount
+          );
         },
-        (grid, dr) => {
-          return gameController.applyDeathSpin(grid, dr);
-        },
-        gameController.betAmount
+        { skipRestore: DEBUG.DEATH_MODE }
       );
-
       deathFeatureActive = false;
       currentDeathAnimation = null;
-
-      // In Death debug mode, keep the visual state (3D model + color tint) active
-      if (!DEBUG.DEATH_MODE) {
-        threeBg?.clearFeatureColor();
-        soundManager.play('model-despawn', 0.6);
-        await threeBg?.restoreDeath();
-      }
-
-      // Restore grid to default 5×3 layout
       gridView.restoreDefaultGrid();
-
-      // Restore all reel columns to visible
-      for (let col = 0; col < gridView.getCols(); col++) {
-        gridView.getReelSpinners()[col].setColumnVisible(true);
-      }
-
-      // Apply total payout to balance
+      gridView.restoreAllColumnsVisible();
       gameController.balance += deathPayout;
       gameController.lastWin = deathPayout;
       currentSpinData.totalWin = deathPayout;
@@ -625,9 +531,7 @@ async function handleSpin() {
       // Clear outlines before showing win display (so they don't overlap the dim screen)
       paylineOverlay.clear();
 
-      // Then: show big win display with headline (FATE BREAKER, etc.)
-      const totalWidth = gridView.getCols() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
-      const totalHeight = gridView.getRows() * (gridView.getCellSize() + gridView.getPadding()) - gridView.getPadding();
+      const { width: tw, height: th } = gridView.getGridDimensions();
       const { WinDisplay } = await import('./game/render/WinDisplay');
       const winDisplayInstance = new WinDisplay(gridView);
       activeWinDisplay = winDisplayInstance;
@@ -636,8 +540,8 @@ async function handleSpin() {
         currentSpinData.multiplier,
         currentSpinData.totalWin,
         gameController.betAmount,
-        totalWidth,
-        totalHeight
+        tw,
+        th
       );
       activeWinDisplay = null;
     }
@@ -662,8 +566,6 @@ async function showResults() {
   
   updateUI();
   
-  console.log('Grid:', currentSpinData.finalGrid);
-  console.log('Tarots:', currentSpinData.tarotColumns);
   if (currentSpinData.feature) {
     console.log(`🃏 Feature: ${currentSpinData.feature.type} ×${currentSpinData.feature.count}`);
   }

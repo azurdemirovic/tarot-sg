@@ -176,7 +176,6 @@ export class CupsRevealAnimation {
       // Check if board is full
       const filledCells = multiplierGrid.flat().filter(v => v !== null).length;
       if (filledCells >= this.cols * this.rows) {
-        console.log('🎉 Full table bonus! All multipliers ×2');
         // Double all multipliers
         for (let col = 0; col < this.cols; col++) {
           for (let row = 0; row < this.rows; row++) {
@@ -229,7 +228,6 @@ export class CupsRevealAnimation {
           } else {
             // Existing multiplier: ALWAYS multiply (stack them)
             multiplierGrid[col][row]! *= newMultiplier;
-            console.log(`🔄 Multiplier stacked: ${col},${row} → ×${multiplierGrid[col][row]}`);
             multipliersToLand.push({ col, row, value: multiplierGrid[col][row]!, isNew: false });
             // Landing on existing cell does NOT count as "landing" for lives
           }
@@ -243,7 +241,6 @@ export class CupsRevealAnimation {
       if (!newMultipliersLanded) {
         lives--;
         this.updateLivesDisplay(lives);
-        console.log(`💔 No new multipliers landed. Lives: ${lives}`);
         await wait(500);
       }
 
@@ -252,7 +249,6 @@ export class CupsRevealAnimation {
 
     // Calculate total multiplier
     const totalMultiplier = multiplierGrid.flat().reduce((sum, v) => (sum || 0) + (v || 0), 0) || 0;
-    console.log(`☕ Cups Feature Complete: Total Multiplier = ×${totalMultiplier}`);
 
     return totalMultiplier;
   }

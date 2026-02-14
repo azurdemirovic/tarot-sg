@@ -51,7 +51,6 @@ export class GridView extends Container {
       // Add frame on top of everything — high zIndex so overlays stay behind
       this.frameSprite.zIndex = 100;
       this.addChild(this.frameSprite);
-      console.log('✅ Frame loaded');
     } catch (error) {
       console.warn('Frame image not found:', error);
     }
@@ -73,7 +72,6 @@ export class GridView extends Container {
         this.bgPlaceholder.destroy();
         this.bgPlaceholder = null;
       }
-      console.log('✅ Background loaded');
     } catch (error) {
       console.warn('Background image not found, using white fallback:', error);
       const bg = new Graphics();
@@ -442,12 +440,26 @@ export class GridView extends Container {
     return this.reelSpinners.some(reel => reel.isStillScrolling());
   }
 
-  // ── Accessors for FoolRevealAnimation ──
   getReelSpinners(): ReelSpinner[] { return this.reelSpinners; }
   getCellSize(): number { return this.cellSize; }
   getPadding(): number { return this.padding; }
   getCols(): number { return this.cols; }
   getRows(): number { return this.rows; }
+
+  /** Total pixel width/height of the grid content area. */
+  getGridDimensions(): { width: number; height: number } {
+    return {
+      width: this.cols * (this.cellSize + this.padding) - this.padding,
+      height: this.rows * (this.cellSize + this.padding) - this.padding,
+    };
+  }
+
+  /** Restore all reel columns to visible (used after features that hide columns). */
+  restoreAllColumnsVisible(): void {
+    for (let col = 0; col < this.cols; col++) {
+      this.reelSpinners[col].setColumnVisible(true);
+    }
+  }
 
   /**
    * Get the grid's center position in screen (CSS pixel) coordinates.
@@ -562,7 +574,6 @@ export class GridView extends Container {
     this.cols = newCols;
     this.rows = newRows;
 
-    console.log(`🔄 Grid resized to ${newCols}×${newRows}, cellSize=${newCellSize}, padding=${newPadding}, offset=(${offsetX},${offsetY})`);
   }
 
   /**
@@ -607,7 +618,6 @@ export class GridView extends Container {
     this.cols = origCols;
     this.rows = origRows;
 
-    console.log('🔄 Grid restored to default 5×3');
   }
 
   /**

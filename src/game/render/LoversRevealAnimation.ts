@@ -7,7 +7,7 @@ import { GridView } from './GridView';
 import { WinDisplay } from './WinDisplay';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-import { tween, wait, easeOutCubic, easeOutBack } from '../utils/AnimationUtils';
+import { tween, wait, easeOutCubic, easeOutBack, spawnDarkParticleGlow } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
@@ -74,7 +74,6 @@ export class LoversRevealAnimation {
       // Phase C — Multi-spin loop
       while (loversResult.spinsRemaining > 0) {
         const spinNum = loversResult.spinsTotal - loversResult.spinsRemaining + 1;
-        console.log(`Lovers Spin ${spinNum}/${loversResult.spinsTotal}`);
 
         // Show spin counter on overlay
         await this.showSpinCounter(spinNum, loversResult.spinsTotal, totalWidth);
@@ -481,70 +480,12 @@ export class LoversRevealAnimation {
     await Promise.all(allDone);
   }
 
-  // ── Glow effects (dark, diffuse particle-like burst) ────
-  private spawnAnchorGlow(col: number, row: number, step: number, _color: number): void {
-    this.spawnDarkParticleGlow(col, row, step, 700);
+  private spawnAnchorGlow(col: number, row: number, _step: number, _color: number): void {
+    spawnDarkParticleGlow(this.glowContainer, col, row, this.cellSize, this.padding);
   }
 
-  private spawnBondGlow(col: number, row: number, step: number): void {
-    this.spawnDarkParticleGlow(col, row, step, 700);
-  }
-
-  private spawnDarkParticleGlow(col: number, row: number, step: number, duration: number): void {
-    const cx = col * step + this.cellSize / 2;
-    const cy = row * step + this.cellSize / 2;
-
-    const glowGroup = new Container();
-    glowGroup.x = cx;
-    glowGroup.y = cy;
-    this.glowContainer.addChild(glowGroup);
-
-    const particleCount = 8;
-    const particles: { g: Graphics; offsetX: number; offsetY: number; baseRadius: number; speed: number; phase: number }[] = [];
-
-    for (let i = 0; i < particleCount; i++) {
-      const g = new Graphics();
-      glowGroup.addChild(g);
-      const angle = (i / particleCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
-      const dist = this.cellSize * (0.05 + Math.random() * 0.15);
-      particles.push({
-        g,
-        offsetX: Math.cos(angle) * dist,
-        offsetY: Math.sin(angle) * dist,
-        baseRadius: this.cellSize * (0.15 + Math.random() * 0.2),
-        speed: 0.7 + Math.random() * 0.6,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-
-    tween(duration, (t) => {
-      for (const p of particles) {
-        p.g.clear();
-        const life = t * p.speed;
-        const expand = 0.5 + life * 0.8;
-        const radius = p.baseRadius * expand;
-        const drift = t * 1.3;
-
-        let alpha: number;
-        if (t < 0.15) {
-          alpha = (t / 0.15) * 0.4;
-        } else if (t < 0.5) {
-          alpha = 0.4 - (t - 0.15) * 0.15;
-        } else {
-          alpha = 0.35 * (1 - (t - 0.5) / 0.5) * 0.6;
-        }
-
-        const px = p.offsetX * drift + Math.sin(p.phase + t * 4) * 2;
-        const py = p.offsetY * drift + Math.cos(p.phase + t * 3) * 2;
-
-        p.g.circle(px, py, radius);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.3 });
-        p.g.circle(px, py, radius * 0.65);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.5 });
-        p.g.circle(px, py, radius * 0.3);
-        p.g.fill({ color: 0x000000, alpha: alpha * 0.7 });
-      }
-    }, easeOutCubic);
+  private spawnBondGlow(col: number, row: number, _step: number): void {
+    spawnDarkParticleGlow(this.glowContainer, col, row, this.cellSize, this.padding);
   }
 
   // ── Spin Counter Display ─────────────────────────────────
