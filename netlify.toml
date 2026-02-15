@@ -1,0 +1,25 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Enable Brotli compression for GLB files (Netlify compresses automatically,
+# but this ensures the right content types are set)
+[[headers]]
+  for = "/assets/3d/*.glb"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/symbols/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/tarots/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/sound/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

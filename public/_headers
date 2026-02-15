@@ -1,0 +1,19 @@
+# ── Netlify custom headers ──
+
+# GLB 3D models: long cache (1 year), Netlify auto-compresses with Brotli
+/assets/3d/*.glb
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: model/gltf-binary
+
+# Static assets: long cache
+/assets/symbols/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/tarots/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/sound/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
