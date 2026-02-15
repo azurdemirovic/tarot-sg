@@ -1,6 +1,7 @@
 import { ThreeBackground } from '../../threeBackground';
 import { TearScreenRect } from './TarotTearEffect';
 import { ReelSpinner } from './ReelSpinner';
+import { soundManager } from '../utils/SoundManager';
 
 /**
  * Helper to compute screen-space rects for tarot columns and trigger tear effects.
@@ -119,8 +120,7 @@ export async function playTarotTearEffects(
   const canvasRect = pixiCanvas.getBoundingClientRect();
   const scaleX = canvasRect.width / pixiCanvas.width;
   const scaleY = canvasRect.height / pixiCanvas.height;
-  const cols = 5; // grid columns
-  const step = cellSize + padding;
+  const cols = 5;
   const gridW = cols * cellSize + (cols - 1) * padding;
   const gridH = rows * cellSize + (rows - 1) * padding;
   const inset = 6 * scaleY; // small inset to stay inside the frame
@@ -149,20 +149,7 @@ export async function playTarotTearEffects(
     }
   };
 
-  // Play tear sound when the tear animation starts
-  try {
-    const tearCtx = new AudioContext();
-    const resp = await fetch('/assets/sound/tear-tarot.wav');
-    const buf = await tearCtx.decodeAudioData(await resp.arrayBuffer());
-    const src = tearCtx.createBufferSource();
-    src.buffer = buf;
-    const gain = tearCtx.createGain();
-    gain.gain.value = 1.0;
-    src.connect(gain);
-    gain.connect(tearCtx.destination);
-    src.start(0);
-    src.onended = () => tearCtx.close();
-  } catch (e) { console.warn('🔊 Tear sound failed:', e); }
+  soundManager.play('tear-tarot', 1.0);
 
   // Play tear effects with stagger, clipped to grid area
   await threeBg.playTearEffects(tearColumns, stagger, gridScreenRect, onReady);

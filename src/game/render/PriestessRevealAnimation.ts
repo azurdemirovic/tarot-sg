@@ -24,6 +24,7 @@ import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
 import { tween, wait, easeOutCubic, easeOutBack } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
+import { FeatureWinTracker } from './FeatureWinTracker';
 
 export class PriestessRevealAnimation {
   private mysteryOverlays: Map<string, Container> = new Map(); // key: "col,row"
@@ -90,6 +91,9 @@ export class PriestessRevealAnimation {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
 
+    // Persistent "WON" total display below the frame
+    const winTracker = new FeatureWinTracker();
+
     // Mount overlay for spin counter
     this.parent.addChild(this.overlayContainer);
 
@@ -136,12 +140,13 @@ export class PriestessRevealAnimation {
         // B6: Update persistent cells with all mystery cells from this spin
         this.persistentMysteryCells = [...spinResult.mysteryCells];
 
-        // B7: Accumulate payout
+        // B7: Accumulate payout and update persistent WON display
         if (wins.length > 0 && totalWin > 0) {
           totalPayout += totalWin;
+          await winTracker.addWin(totalWin);
         }
 
-        // B8: Show per-spin win using WinDisplay (only if win > 10× bet, same as Lovers/Fool)
+        // B8: Show per-spin win using WinDisplay (only if win > 10× bet)
         const winDisplay = new WinDisplay(this.parent);
         await winDisplay.show(
           wins,
@@ -161,6 +166,7 @@ export class PriestessRevealAnimation {
 
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
+      winTracker.dispose();
       // Final cleanup — restore all reel sprite visibility
       for (let col = 0; col < this.cols; col++) {
         const sprites = this.reelSpinners[col].getVisibleSprites();

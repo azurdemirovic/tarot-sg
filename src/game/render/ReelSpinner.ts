@@ -1,5 +1,6 @@
 import { Container, Sprite, Graphics } from 'pixi.js';
 import { AssetLoader } from '../AssetLoader';
+import { soundManager } from '../utils/SoundManager';
 
 export class ReelSpinner extends Container {
   private strip: Sprite[] = [];
@@ -7,51 +8,23 @@ export class ReelSpinner extends Container {
   private isSpinning: boolean = false;
   private scrollOffset: number = 0;
   private targetOffset: number = 0;
-  private velocity: number = 60; // Fast!
+  private velocity: number = 60;
   private cellSize: number;
   private rows: number;
   private finalSymbols: string[] = [];
   private isTarotColumn: boolean = false;
-  private cardbackId: string | null = null;       // cardback texture ID shown during spin
-  private actualTarotId: string | null = null;     // real tarot texture ID for flip reveal
-  
-  // Bounce state
+  private actualTarotId: string | null = null;
+
   private bouncing: boolean = false;
   private bounceOffset: number = 0;
   private bounceVelocity: number = 0;
   private bounceTime: number = 0;
 
-  // Landing sound — shared across all reel spinners
-  private static landAudioContext: AudioContext | null = null;
-  private static landAudioBuffer: AudioBuffer | null = null;
-  private static landSoundLoaded: boolean = false;
-
-  static async loadLandSound(): Promise<void> {
-    if (ReelSpinner.landSoundLoaded) return;
-    try {
-      ReelSpinner.landAudioContext = new AudioContext();
-      const response = await fetch('/assets/sound/land-normal.wav');
-      const arrayBuffer = await response.arrayBuffer();
-      ReelSpinner.landAudioBuffer = await ReelSpinner.landAudioContext.decodeAudioData(arrayBuffer);
-      ReelSpinner.landSoundLoaded = true;
-    } catch (e) {
-      console.warn('🔊 Could not load land sound:', e);
-    }
-  }
+  /** @deprecated No longer needed — sounds are preloaded via SoundManager. */
+  static async loadLandSound(): Promise<void> {}
 
   private playLandSound(): void {
-    if (!ReelSpinner.landAudioContext || !ReelSpinner.landAudioBuffer) return;
-    // Resume context if suspended (browser autoplay policy)
-    if (ReelSpinner.landAudioContext.state === 'suspended') {
-      ReelSpinner.landAudioContext.resume();
-    }
-    const source = ReelSpinner.landAudioContext.createBufferSource();
-    source.buffer = ReelSpinner.landAudioBuffer;
-    const gain = ReelSpinner.landAudioContext.createGain();
-    gain.gain.value = 1.0;
-    source.connect(gain);
-    gain.connect(ReelSpinner.landAudioContext.destination);
-    source.start(0);
+    soundManager.play('land-normal', 1.0);
   }
 
   private padding: number;
@@ -97,8 +70,8 @@ export class ReelSpinner extends Container {
   startSpin(finalSymbols: string[], isTarotColumn: boolean = false, cardbackId?: string): void {
     this.finalSymbols = finalSymbols;
     this.isTarotColumn = isTarotColumn;
-    this.cardbackId = cardbackId || null;
     this.actualTarotId = isTarotColumn ? finalSymbols[0] : null;
+    const displayCardbackId = cardbackId || null;
     this.updateMask();
     this.isSpinning = true;
     this.bouncing = false;
@@ -124,10 +97,9 @@ export class ReelSpinner extends Container {
       }
     }
     
-    // If tarot column with cardback, use cardback ID for the tall display sprite
     const displaySymbols = [...finalSymbols];
-    if (isTarotColumn && cardbackId) {
-      displaySymbols[0] = cardbackId; // Show cardback instead of tarot face
+    if (isTarotColumn && displayCardbackId) {
+      displaySymbols[0] = displayCardbackId;
     }
     
     // Strip = [display0, display1, display2, filler0, ..., filler49]

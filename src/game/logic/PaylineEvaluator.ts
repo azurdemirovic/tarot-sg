@@ -1,4 +1,3 @@
-import { AssetLoader } from '../AssetLoader';
 import { Grid, WinLine } from '../Types';
 import paylines from '../config/paylines';
 import paytableData from '../config/paytable.json';
@@ -20,7 +19,7 @@ export class PaylineEvaluator {
   /** Current total bet amount — used to derive betPerLine dynamically */
   public currentBetAmount: number = 0.20;
 
-  constructor(private assetLoader: AssetLoader) {
+  constructor(_assetLoader: unknown) {
     this.paytable = paytableData as Paytable;
   }
 

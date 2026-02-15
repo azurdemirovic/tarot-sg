@@ -25,6 +25,7 @@ import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
 import { tween, wait, easeOutCubic } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
+import { FeatureWinTracker } from './FeatureWinTracker';
 
 export class DeathRevealAnimation {
   // @ts-ignore -- tracked for potential future use
@@ -82,6 +83,9 @@ export class DeathRevealAnimation {
 
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
+    // Persistent "WON" total display below the frame
+    const winTracker = new FeatureWinTracker();
 
     // Mount overlay for UI elements
     this.parent.addChild(this.overlayContainer);
@@ -205,12 +209,13 @@ export class DeathRevealAnimation {
           await this.phaseExpansionAnimation(deathResult, totalWidth, scaleX, scaleY);
         }
 
-        // B9: Accumulate payout
+        // B9: Accumulate payout and update persistent WON display
         if (totalWin > 0) {
           totalPayout += totalWin;
+          await winTracker.addWin(totalWin);
         }
 
-        // B10: Show per-spin win (use cluster wins as synthetic win entries)
+        // B10: Show per-spin win (use cluster wins as synthetic win entries, only if > 10× bet)
         if (spinResult.clusterWins.length > 0 && totalWin > 0) {
           const syntheticWins = spinResult.clusterWins.map(cw => ({
             payout: cw.payout,
@@ -233,6 +238,7 @@ export class DeathRevealAnimation {
 
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
+      winTracker.dispose();
       // Cleanup
       this.cleanupOverlay();
     }

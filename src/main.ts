@@ -71,9 +71,33 @@ async function init() {
 
     console.log('🎨 Loading assets...');
 
-    // Load assets
+    // Loading screen elements
+    const loadingBar = document.getElementById('loading-bar') as HTMLElement;
+    const loadingScreen = document.getElementById('loading-screen') as HTMLElement;
+
+    // ── Start Three.js 3D model loading EARLY (in parallel with texture loading) ──
+    if (DEBUG.BG_ENABLED) {
+      const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
+      if (threeCanvas) {
+        threeBg = new ThreeBackground({
+          canvas: threeCanvas,
+          modelPath: '/assets/3d/free_game_character_-the_ancient_woman_titan.glb',
+          animate: DEBUG.BG_ANIMATE_CAMERA,
+        });
+        console.log('✅ Three.js 3D background initialized (models loading in parallel)');
+
+        // Track 3D model loading progress (40%–100% of loading bar)
+        threeBg.onModelProgress = (progress) => {
+          loadingBar.style.width = `${40 + Math.round(progress * 60)}%`;
+        };
+      }
+    }
+
+    // Load PixiJS assets with progress (textures = first 40%)
     assetLoader = new AssetLoader();
-    await assetLoader.load();
+    await assetLoader.load((progress) => {
+      loadingBar.style.width = `${Math.round(progress * 40)}%`;
+    });
 
     console.log('✅ Assets loaded');
 
@@ -134,9 +158,9 @@ async function init() {
       gridView.update(ticker.deltaTime);
     });
 
-    // ── Preload all sounds via SoundManager ──
+    // ── Preload all sounds via SoundManager (in parallel with 3D model wait) ──
     ReelSpinner.loadLandSound();
-    await soundManager.preloadAll();
+    const soundsReady = soundManager.preloadAll();
 
     // ── Background music starts on first user interaction ──
     const startBgMusic = () => {
@@ -146,26 +170,25 @@ async function init() {
     window.addEventListener('click', startBgMusic);
     window.addEventListener('keydown', startBgMusic);
 
-    // ── Initialize Three.js 3D background ──
-    if (DEBUG.BG_ENABLED) {
-      const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
-      if (threeCanvas) {
-        threeBg = new ThreeBackground({
-          canvas: threeCanvas,
-          modelPath: '/assets/3d/free_game_character_-the_ancient_woman_titan.glb',
-          animate: DEBUG.BG_ANIMATE_CAMERA,
-        });
-        console.log('✅ Three.js 3D background initialized');
+    // ── Wait for main 3D model AND sounds before dismissing loading screen ──
+    await soundsReady; // sounds in parallel with model loading
+    if (threeBg) {
+      await threeBg.mainModelReady;
+      loadingBar.style.width = '100%';
+      console.log('✅ Main 3D model loaded — feature models loading in background');
 
-        // Death debug mode: activate Death visual state persistently
-        if (DEBUG.DEATH_MODE) {
-          threeBg.setFeatureColor('T_DEATH');
-          threeBg.swapToDeath().then(() => {
-            console.log('💀 DEBUG: Death mode visuals activated (3D model + color tint)');
-          });
-        }
+      // Death debug mode: activate Death visual state persistently
+      if (DEBUG.DEATH_MODE) {
+        threeBg.setFeatureColor('T_DEATH');
+        threeBg.swapToDeath().then(() => {
+          console.log('💀 DEBUG: Death mode visuals activated (3D model + color tint)');
+        });
       }
     }
+
+    // ── Hide loading screen with fade-out ──
+    loadingScreen.classList.add('hidden');
+    setTimeout(() => loadingScreen.remove(), 600);
   } catch (error) {
     console.error('❌ Initialization error:', error);
   }

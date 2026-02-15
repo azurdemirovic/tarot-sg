@@ -9,6 +9,7 @@ import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
 import { tween, wait, easeOutCubic, easeOutBack, spawnDarkParticleGlow } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
+import { FeatureWinTracker } from './FeatureWinTracker';
 
 // ═══════════════════════════════════════════════════════════════
 //  LoversRevealAnimation
@@ -56,6 +57,9 @@ export class LoversRevealAnimation {
   ): Promise<void> {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
+    // Persistent "WON" total display below the frame
+    const winTracker = new FeatureWinTracker();
 
     // Mount overlay layers
     this.parent.addChild(this.overlay);
@@ -106,13 +110,19 @@ export class LoversRevealAnimation {
         // C4: Animate bond fill over the bounding rectangle (area creation)
         await this.phaseBondFill(spinResult, result.finalGrid);
 
-        // C5: Show win calculation and payout for this spin
+        // C5: Accumulate payout and update persistent WON display
+        if (result.wins.length > 0 && result.totalWin > 0) {
+          await winTracker.addWin(result.totalWin);
+        }
+
+        // C6: Show per-spin win using WinDisplay (only if win > 10× bet)
         const winDisplay = new WinDisplay(this.parent);
         await winDisplay.show(result.wins, result.multiplier, result.totalWin, betAmount, totalWidth, totalHeight);
 
         await wait(400);
       }
     } finally {
+      winTracker.dispose();
       this.cleanup();
     }
   }
@@ -132,9 +142,6 @@ export class LoversRevealAnimation {
       }
       finalSymbolIds.set(col, symbolIds);
     }
-
-    // Store for phaseRevealPremiums to reuse
-    this._loversUnderlyingSymbols = finalSymbolIds;
 
     if (this.threeBg && this.pixiCanvas) {
       await playTarotTearEffects(
@@ -156,8 +163,6 @@ export class LoversRevealAnimation {
       }
     }
   }
-
-  private _loversUnderlyingSymbols: Map<number, string[]> = new Map();
 
   // ── Phase B: Reveal freed columns with premium symbols ──
   // Symbols are already visible from the tear — just ensure columns are shown.

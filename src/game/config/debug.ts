@@ -43,7 +43,7 @@ export const DEBUG = {
   FOOL_COLUMNS: [1, 3],
 
   /** Force Fool feature with guaranteed big win (3 Fool columns = ×5 multiplier + max wilds) */
-  FORCE_FOOL_BIG_WIN: true,
+  FORCE_FOOL_BIG_WIN: false,
 
   /** Columns to place Fool cards for big win (3 columns for ×5 multiplier) */
   FOOL_BIG_WIN_COLUMNS: [0, 2, 4],

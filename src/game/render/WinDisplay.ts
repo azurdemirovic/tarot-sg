@@ -104,11 +104,11 @@ export class WinDisplay {
 
   // ── Win Headlines (sorted by ascending win magnitude) ──
   private static readonly WIN_HEADLINES: { minMultiplier: number; text: string; color: number }[] = [
-    { minMultiplier: 50, text: 'YOUR NAME IS WRITTEN IN THE STARS', color: 0xFFFFFF },
-    { minMultiplier: 30, text: 'THE VEIL RIPS OPEN!',               color: 0xFF4444 },
-    { minMultiplier: 15, text: 'FATE BREAKER',                      color: 0xFF69B4 },
-    { minMultiplier: 5,  text: 'PROPHECY PAYS!',                    color: 0xFFAA00 },
-    { minMultiplier: 2,  text: 'THE SPREAD FAVORS YOU!',            color: 0xFFD700 },
+    { minMultiplier: 50, text: 'YOUR NAME IS WRITTEN IN THE STARS!', color: 0xFFFFFF },
+    { minMultiplier: 30, text: 'THE VEIL RIPS OPEN!',                color: 0xFF4444 },
+    { minMultiplier: 15, text: 'FATE BREAKER!',                      color: 0xFF69B4 },
+    { minMultiplier: 5,  text: 'PROPHECY PAYS!',                     color: 0xFFAA00 },
+    { minMultiplier: 2,  text: 'THE SPREAD FAVORS YOU!',             color: 0xFFD700 },
   ];
 
   private getHeadline(totalWin: number, betAmount: number): { text: string; color: number } | null {
@@ -158,16 +158,22 @@ export class WinDisplay {
     this.dimGraphic.fill({ color: 0x000000, alpha: 0.6 });
     this.overlay.addChild(this.dimGraphic);
 
-    // 2. Dramatic headline based on win magnitude — curved arc text (auto 2-row for long text)
+    // 2. Dramatic headline based on win magnitude — letter-by-letter jump-in
     const headline = this.getHeadline(totalWin, this.betAmount);
     let headlineContainer: Container | null = null;
     if (headline) {
-      headlineContainer = new Container();
-      headlineContainer.x = tw / 2;
-      headlineContainer.y = th / 2 - 90;
-      headlineContainer.alpha = 0;
-      headlineContainer.scale.set(0.5);
-      this.overlay.addChild(headlineContainer);
+      // Split into two lines if text is long (more than ~18 chars)
+      const words = headline.text.split(' ');
+      let lines: string[];
+      if (headline.text.length > 18 && words.length >= 3) {
+        const mid = Math.ceil(words.length / 2);
+        lines = [
+          words.slice(0, mid).join(' '),
+          words.slice(mid).join(' '),
+        ];
+      } else {
+        lines = [headline.text];
+      }
 
       const baseFontSize = 36;
       const charStyle = new TextStyle({
@@ -183,100 +189,86 @@ export class WinDisplay {
         },
       });
 
-      // Split into two rows if text is long (more than ~18 chars)
-      const words = headline.text.split(' ');
-      let lines: string[];
-      if (headline.text.length > 18 && words.length >= 3) {
-        // Split roughly in half by word count
-        const mid = Math.ceil(words.length / 2);
-        lines = [
-          words.slice(0, mid).join(' '),
-          words.slice(mid).join(' '),
-        ];
-      } else {
-        lines = [headline.text];
-      }
+      headlineContainer = new Container();
+      headlineContainer.x = tw / 2;
+      headlineContainer.y = th / 2 - 110;
+      this.overlay.addChild(headlineContainer);
 
-      const rowSpacing = baseFontSize * 1.3;
-      const totalBlockHeight = (lines.length - 1) * rowSpacing;
+      // Build all character Text objects with layout positions
+      const allChars: { text: Text; targetX: number; targetY: number }[] = [];
+      const lineHeight = baseFontSize * 1.4;
+      const totalHeight = (lines.length - 1) * lineHeight;
 
       for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
         const lineText = lines[lineIdx];
-        const chars = lineText.split('');
-        const yOffset = -totalBlockHeight / 2 + lineIdx * rowSpacing;
+        const yOffset = -totalHeight / 2 + lineIdx * lineHeight;
 
-        // Measure character widths
-        const charTexts: Text[] = [];
-        const charWidths: number[] = [];
-        for (const ch of chars) {
+        // Create chars and measure total width
+        const lineChars: Text[] = [];
+        let totalWidth = 0;
+        const spacing = 2;
+        for (const ch of lineText) {
           const ct = new Text({ text: ch, style: charStyle });
           ct.anchor.set(0.5);
-          charTexts.push(ct);
-          charWidths.push(ct.width);
+          lineChars.push(ct);
+          totalWidth += ct.width + spacing;
         }
+        totalWidth -= spacing; // remove trailing spacing
 
-        const letterSpacing = baseFontSize * 0.12;
-        let totalArcLen = 0;
-        for (let i = 0; i < chars.length; i++) {
-          totalArcLen += charWidths[i];
-          if (i < chars.length - 1) totalArcLen += letterSpacing;
-        }
+        // Position chars centered on X
+        let xCursor = -totalWidth / 2;
+        for (const ct of lineChars) {
+          const cx = xCursor + ct.width / 2;
+          xCursor += ct.width + spacing;
 
-        // Arc parameters — gentle upward curve; second line curves downward
-        const radius = baseFontSize * 8;
-        const totalAngle = totalArcLen / radius;
-        const isTopRow = lineIdx === 0;
-        const startAngle = isTopRow
-          ? -Math.PI / 2 - totalAngle / 2   // curves upward
-          : -Math.PI / 2 - totalAngle / 2;  // same direction for consistency
-
-        // For bottom row, flip the arc so it curves downward (like a parenthesis pair)
-        const arcSign = isTopRow || lines.length === 1 ? 1 : -1;
-
-        let angle = startAngle;
-        for (let i = 0; i < chars.length; i++) {
-          const halfCharAngle = charWidths[i] / 2 / radius;
-          angle += halfCharAngle;
-
-          const cx = radius * Math.cos(angle);
-          const cy = arcSign * (radius + radius * Math.sin(angle)) + yOffset;
-          const rotation = angle + Math.PI / 2;
-
-          charTexts[i].x = cx;
-          charTexts[i].y = cy;
-          charTexts[i].rotation = arcSign > 0 ? rotation : -rotation + Math.PI;
-          headlineContainer!.addChild(charTexts[i]);
-
-          angle += halfCharAngle;
-          if (i < chars.length - 1) {
-            angle += letterSpacing / radius;
-          }
+          ct.x = cx;
+          ct.y = yOffset;
+          ct.alpha = 0;
+          headlineContainer.addChild(ct);
+          allChars.push({ text: ct, targetX: cx, targetY: yOffset });
         }
       }
 
-      // Scale down if headline would exceed frame width (with padding)
+      // Scale down if headline would exceed frame width
       const maxWidth = tw * 0.85;
-      const maxHeight = th * 0.35;
       const bounds = headlineContainer.getLocalBounds();
-      let constraintScale = 1;
       if (bounds.width > maxWidth) {
-        constraintScale = Math.min(constraintScale, maxWidth / bounds.width);
-      }
-      if (bounds.height > maxHeight) {
-        constraintScale = Math.min(constraintScale, maxHeight / bounds.height);
-      }
-      if (constraintScale < 1) {
-        headlineContainer.scale.set(0.5 * constraintScale);
+        const s = maxWidth / bounds.width;
+        headlineContainer.scale.set(s);
       }
 
-      // Animate headline slam-in
-      const targetScale = headlineContainer.scale.x * 2; // from half to full
-      const halfScale = headlineContainer.scale.x;
-      await tween(500, (t) => {
-        headlineContainer!.alpha = Math.min(1, t * 2);
-        const s = halfScale + (targetScale - halfScale) * easeOutCubic(t);
-        headlineContainer!.scale.set(s);
-      }, easeOutCubic);
+      // Animate letters jumping in one by one
+      const staggerDelay = 30; // ms between each letter
+      const jumpHeight = 30; // pixels each letter drops from
+      const letterDuration = 250; // ms per letter animation
+      const totalAnimTime = allChars.length * staggerDelay + letterDuration;
+
+      await new Promise<void>(resolve => {
+        const start = performance.now();
+        const frame = (now: number) => {
+          const elapsed = now - start;
+          for (let i = 0; i < allChars.length; i++) {
+            const charStart = i * staggerDelay;
+            const t = Math.max(0, Math.min(1, (elapsed - charStart) / letterDuration));
+            const ease = easeOutCubic(t);
+            allChars[i].text.alpha = ease;
+            allChars[i].text.y = allChars[i].targetY - jumpHeight * (1 - ease);
+            allChars[i].text.scale.set(0.5 + 0.5 * ease);
+          }
+          if (elapsed < totalAnimTime) {
+            requestAnimationFrame(frame);
+          } else {
+            // Ensure all at final state
+            for (const c of allChars) {
+              c.text.alpha = 1;
+              c.text.y = c.targetY;
+              c.text.scale.set(1);
+            }
+            resolve();
+          }
+        };
+        requestAnimationFrame(frame);
+      });
 
       await wait(200);
     }
@@ -302,11 +294,11 @@ export class WinDisplay {
     });
     payoutText.anchor.set(0.5);
     payoutText.x = tw / 2 - 60;
-    payoutText.y = th / 2 - 40;
+    payoutText.y = th / 2 - 20;
     payoutText.alpha = 0;
     this.overlay.addChild(payoutText);
 
-    // 4. Create multiplier text (next to payout)
+    // 4b. Create multiplier text (next to payout)
     const multiplierText = new Text({
       text: `×${multiplier}`,
       style: new TextStyle({
@@ -324,7 +316,7 @@ export class WinDisplay {
     });
     multiplierText.anchor.set(0.5);
     multiplierText.x = tw / 2 + 60;
-    multiplierText.y = th / 2 - 40;
+    multiplierText.y = th / 2 - 20;
     multiplierText.alpha = 0;
     this.overlay.addChild(multiplierText);
 
@@ -346,7 +338,7 @@ export class WinDisplay {
     });
     this.totalText.anchor.set(0.5);
     this.totalText.x = tw / 2;
-    this.totalText.y = th / 2 + 30;
+    this.totalText.y = th / 2 + 50;
     this.totalText.alpha = 0;
     this.totalText.scale.set(0.8);
     this.overlay.addChild(this.totalText);

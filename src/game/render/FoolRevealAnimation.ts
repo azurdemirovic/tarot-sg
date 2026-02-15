@@ -1,11 +1,10 @@
-import { Container, Graphics } from 'pixi.js';
-import { AssetLoader } from '../AssetLoader';
+import { Container } from 'pixi.js';
 import { FeatureTrigger, Grid } from '../Types';
 import { FoolResult } from '../logic/TarotFeatureProcessor';
 import { ReelSpinner } from './ReelSpinner';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
-import { tween, wait, easeOutCubic, easeInOutQuad, linear, spawnDarkParticleGlow } from '../utils/AnimationUtils';
+import { wait, spawnDarkParticleGlow } from '../utils/AnimationUtils';
 import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
@@ -15,7 +14,6 @@ import { soundManager } from '../utils/SoundManager';
 // ═══════════════════════════════════════════════════════════════
 export class FoolRevealAnimation {
   private overlay: Container;
-  private dimGraphic: Graphics;
   private particleContainer: Container;
   private glowContainer: Container;
   
@@ -23,16 +21,15 @@ export class FoolRevealAnimation {
   constructor(
     private parent: Container,
     private reelSpinners: ReelSpinner[],
-    private assetLoader: AssetLoader,
+    _assetLoader: unknown,
     private cellSize: number,
     private padding: number,
-    private cols: number,
+    _cols: number,
     private rows: number,
     private threeBg: ThreeBackground | null = null,
     private pixiCanvas: HTMLCanvasElement | null = null,
   ) {
     this.overlay = new Container();
-    this.dimGraphic = new Graphics();
     this.particleContainer = new Container();
     this.glowContainer = new Container();
   }
@@ -42,13 +39,11 @@ export class FoolRevealAnimation {
     feature: FeatureTrigger,
     foolResult: FoolResult,
     finalGrid: Grid,
-    multiplier: number,
-    wins: any[],
-    totalWin: number,
-    betAmount: number
+    _multiplier: number,
+    _wins: any[],
+    _totalWin: number,
+    _betAmount: number
   ): Promise<void> {
-    const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
-    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
 
     // Mount overlay layers onto parent (GridView)
     this.parent.addChild(this.overlay);
@@ -65,54 +60,6 @@ export class FoolRevealAnimation {
       // Win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
       this.cleanup();
-    }
-  }
-
-  // ── Phase A: Screen Dim ──────────────────────────────────
-  private async phaseDim(tw: number, th: number): Promise<void> {
-    await tween(300, (t) => {
-      this.dimGraphic.clear();
-      this.dimGraphic.rect(-40, -40, tw + 80, th + 80);
-      this.dimGraphic.fill({ color: 0x000000, alpha: t * 0.45 });
-    }, easeInOutQuad);
-  }
-
-  // ── Phase B: Shake Fool Columns ──────────────────────────
-  private async phaseShake(columns: number[]): Promise<void> {
-    // Store originals
-    const origins = columns.map(col => ({
-      col,
-      x: this.reelSpinners[col].x,
-      y: this.reelSpinners[col].y,
-    }));
-
-    const startTime = performance.now();
-
-    await tween(700, (_t) => {
-      // Use real clock for smooth, rapid oscillation
-      const now = performance.now();
-      const elapsed = (now - startTime) / 1000; // seconds
-
-      // Intensity ramps up then spikes at the end
-      let intensity: number;
-      if (_t < 0.7) {
-        intensity = (_t / 0.7) * 6;          // 0 → 6 px
-      } else {
-        intensity = 6 + ((_t - 0.7) / 0.3) * 6; // 6 → 12 px (building to burst)
-      }
-
-      for (const o of origins) {
-        const reel = this.reelSpinners[o.col];
-        // Two different frequencies make the shake feel organic
-        reel.x = o.x + Math.sin(elapsed * 55) * intensity * (0.7 + Math.random() * 0.3);
-        reel.y = o.y + Math.cos(elapsed * 43) * intensity * 0.35;
-      }
-    }, linear);
-
-    // Snap back
-    for (const o of origins) {
-      this.reelSpinners[o.col].x = o.x;
-      this.reelSpinners[o.col].y = o.y;
     }
   }
 
@@ -196,7 +143,6 @@ export class FoolRevealAnimation {
   private cleanup(): void {
     this.parent.removeChild(this.overlay);
     this.overlay.removeChildren();
-    this.dimGraphic.clear();
 
     // Destroy children in sub-containers
     while (this.particleContainer.children.length) {

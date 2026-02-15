@@ -103,10 +103,31 @@ export class ThreeBackground {
   // Lovers glow effect (organic noisy sprite)
   private loversGlow: THREE.Sprite | null = null;
 
+  // Shared GLTF loader with Draco support
+  private _gltfLoader!: GLTFLoader;
+
+  // Promise that resolves when the main model is loaded (for loading screen)
+  public readonly mainModelReady: Promise<void>;
+  private _resolveMainModelReady!: () => void;
+
+  // Promise that resolves when ALL 3D models are loaded and pre-compiled
+  public readonly modelsReady: Promise<void>;
+  private _resolveModelsReady!: () => void;
+  private _modelsLoadedCount: number = 0;
+  private static readonly TOTAL_MODELS = 6; // main + fool + sol + queen + death + lovers
+
   
   constructor(options: ThreeBgOptions) {
     this._animateCamera = options.animate;
     this.clock = new THREE.Clock();
+
+    // Create promises for loading milestones
+    this.mainModelReady = new Promise<void>(resolve => {
+      this._resolveMainModelReady = resolve;
+    });
+    this.modelsReady = new Promise<void>(resolve => {
+      this._resolveModelsReady = resolve;
+    });
 
     // ── Renderer ──
     this.renderer = new THREE.WebGLRenderer({
@@ -179,6 +200,9 @@ export class ThreeBackground {
     this.bgGroup = new THREE.Group();
     this.scene.add(this.bgGroup);
 
+    // ── Set up GLTF loader ──
+    this._gltfLoader = new GLTFLoader();
+
     // ── Load main model (always visible) ──
     this.loadModel(options.modelPath);
 
@@ -205,8 +229,7 @@ export class ThreeBackground {
   }
 
   private loadModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -353,6 +376,8 @@ export class ThreeBackground {
         console.log(
           `✅ 3D background loaded: ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)} → scaled ${scale.toFixed(3)}`
         );
+        this._resolveMainModelReady();
+        this._onModelLoaded();
 
       },
       (progress) => {
@@ -363,6 +388,9 @@ export class ThreeBackground {
       },
       (error) => {
         console.error('❌ Failed to load 3D model:', error);
+        // Resolve anyway so loading screen doesn't hang
+        this._resolveMainModelReady();
+        this._onModelLoaded();
       }
     );
   }
@@ -370,7 +398,10 @@ export class ThreeBackground {
   private renderLoop = (): void => {
     this.animationId = requestAnimationFrame(this.renderLoop);
 
-    const delta = this.clock.getDelta();
+    const rawDelta = this.clock.getDelta();
+    // Clamp delta to avoid animation speed-up after tab switch
+    // (browsers pause requestAnimationFrame when tab is hidden, causing a huge delta spike on return)
+    const delta = Math.min(rawDelta, 1 / 30);
 
     // Tick animation mixers — main model always runs
     if (this.mainMixer) {
@@ -450,6 +481,19 @@ export class ThreeBackground {
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Optional callback for external progress tracking (0..1) */
+  public onModelProgress: ((progress: number) => void) | null = null;
+
+  /** Track model load progress; resolve modelsReady when all are done */
+  private _onModelLoaded(): void {
+    this._modelsLoadedCount++;
+    console.log(`🔄 3D models loaded: ${this._modelsLoadedCount}/${ThreeBackground.TOTAL_MODELS}`);
+    this.onModelProgress?.(this._modelsLoadedCount / ThreeBackground.TOTAL_MODELS);
+    if (this._modelsLoadedCount >= ThreeBackground.TOTAL_MODELS) {
+      this._resolveModelsReady();
+    }
+  }
 
   private onResize(): void {
     this.syncSize();
@@ -782,8 +826,7 @@ export class ThreeBackground {
    * Creates a debug slider panel for adjusting position, rotation, and scale.
    */
   private loadSolModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -860,12 +903,14 @@ export class ThreeBackground {
         this.renderer.render(this.scene, this.camera);
         model.visible = false;
         this.solReady = true;
+        this._onModelLoaded();
 
         console.log(`✅ Sol model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
         console.error('❌ Failed to load Sol model:', error);
+        this._onModelLoaded();
       }
     );
   }
@@ -874,8 +919,7 @@ export class ThreeBackground {
    * Load the queen of swords model for the High Priestess feature.
    */
   private loadQueenModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -948,12 +992,14 @@ export class ThreeBackground {
         this.renderer.render(this.scene, this.camera);
         model.visible = false;
         this.queenReady = true;
+        this._onModelLoaded();
 
         console.log(`✅ Queen of Swords model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
         console.error('❌ Failed to load Queen model:', error);
+        this._onModelLoaded();
       }
     );
   }
@@ -962,8 +1008,7 @@ export class ThreeBackground {
    * Load the death.glb model — always visible with debug slider panel for adjustments.
    */
   private loadDeathModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -1047,12 +1092,14 @@ export class ThreeBackground {
         this.renderer.render(this.scene, this.camera);
         model.visible = false;
         this.deathReady = true;
+        this._onModelLoaded();
 
         console.log(`✅ Death model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
         console.error('❌ Failed to load Death model:', error);
+        this._onModelLoaded();
       }
     );
   }
@@ -1062,8 +1109,7 @@ export class ThreeBackground {
    * Includes debug slider panel for positioning.
    */
   private loadLoversModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -1152,12 +1198,14 @@ export class ThreeBackground {
         this.renderer.render(this.scene, this.camera);
         model.visible = false;
         this.loversReady = true;
+        this._onModelLoaded();
 
         console.log(`✅ Lovers model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
         console.error('❌ Failed to load Lovers model:', error);
+        this._onModelLoaded();
       }
     );
   }
@@ -1312,8 +1360,7 @@ export class ThreeBackground {
    * Load the fool model for the Fool feature.
    */
   private loadFoolModel(path: string): void {
-    const loader = new GLTFLoader();
-    loader.load(
+    this._gltfLoader.load(
       path,
       (gltf) => {
         const model = gltf.scene;
@@ -1422,12 +1469,14 @@ export class ThreeBackground {
         this.renderer.render(this.scene, this.camera);
         model.visible = false;
         this.foolReady = true;
+        this._onModelLoaded();
 
         console.log(`✅ Fool model loaded & pre-compiled: ${path}`);
       },
       undefined,
       (error) => {
         console.error('❌ Failed to load Fool model:', error);
+        this._onModelLoaded();
       }
     );
   }

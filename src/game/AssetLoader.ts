@@ -15,48 +15,44 @@ export class AssetLoader {
   private textures: Map<string, Texture> = new Map();
   public config: SymbolsConfig = symbolsConfig as SymbolsConfig;
 
-  async load(): Promise<void> {
+  async load(onProgress?: (progress: number) => void): Promise<void> {
     console.log('🎨 Loading assets...');
 
     // Use linear (bilinear) filtering for smooth downscaling — avoids grainy look
     TextureSource.defaultOptions.scaleMode = 'linear';
 
-    // Load all symbol textures
+    // Build a flat list of all assets to load (for progress tracking)
+    const loadItems: { id: string; path: string }[] = [];
+
     for (const symbol of this.config.symbols) {
       const path = symbol.isTarot 
         ? `/assets/tarots/${symbol.filename}`
         : `/assets/symbols/${symbol.filename}`;
-      
-      try {
-        const texture = await Assets.load(path);
-        this.textures.set(symbol.id, texture);
-        console.log(`✓ Loaded: ${symbol.id} from ${path}`);
-      } catch (error) {
-        console.error(`✗ Failed to load ${symbol.id}:`, error);
-      }
+      loadItems.push({ id: symbol.id, path });
     }
 
-    // Load cardback textures (one per tarot type)
     const cardbackNames = ['FOOL', 'CUPS', 'LOVERS', 'PRIESTESS', 'DEATH'];
     for (const name of cardbackNames) {
       const id = `CARDBACK_${name}`;
-      const path = `/assets/tarots/${id}.jpg`;
-      try {
-        const texture = await Assets.load(path);
-        this.textures.set(id, texture);
-        console.log(`✓ Loaded: ${id}`);
-      } catch (error) {
-        console.error(`✗ Failed to load ${id}:`, error);
-      }
+      loadItems.push({ id, path: `/assets/tarots/${id}.jpg` });
     }
 
-    // Load mystery symbol texture (used by Priestess feature)
-    try {
-      const mysteryTexture = await Assets.load('/assets/symbols/MYSTERY.png');
-      this.textures.set('MYSTERY', mysteryTexture);
-      console.log('✓ Loaded: MYSTERY');
-    } catch (error) {
-      console.error('✗ Failed to load MYSTERY:', error);
+    loadItems.push({ id: 'MYSTERY', path: '/assets/symbols/MYSTERY.png' });
+
+    // Load all assets sequentially with progress
+    let loaded = 0;
+    const total = loadItems.length;
+
+    for (const item of loadItems) {
+      try {
+        const texture = await Assets.load(item.path);
+        this.textures.set(item.id, texture);
+        console.log(`✓ Loaded: ${item.id} from ${item.path}`);
+      } catch (error) {
+        console.error(`✗ Failed to load ${item.id}:`, error);
+      }
+      loaded++;
+      onProgress?.(loaded / total);
     }
 
     console.log(`✅ Loaded ${this.textures.size} textures`);

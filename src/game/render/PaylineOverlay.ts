@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics } from 'pixi.js';
 import { WinLine } from '../Types';
 import paylines from '../config/paylines';
 import { DEBUG } from '../config/debug';
@@ -48,7 +48,7 @@ export class PaylineOverlay extends Container {
    * Display winning paylines — draws lines only if SHOW_PAYLINES debug is on.
    * Always highlights winning symbols with radiating black outline.
    */
-  showWinningPaylines(wins: WinLine[], reelSpinners?: ReelSpinner[]): void {
+  showWinningPaylines(wins: WinLine[], _reelSpinners?: ReelSpinner[]): void {
     this.clear();
 
     // Debug: draw connecting lines
@@ -60,8 +60,8 @@ export class PaylineOverlay extends Container {
     }
 
     // Always: highlight winning symbols with radiating outline
-    if (reelSpinners) {
-      this.highlightWinningSymbols(wins, reelSpinners);
+    if (_reelSpinners) {
+      this.highlightWinningSymbols(wins, _reelSpinners);
     }
   }
 
@@ -99,7 +99,7 @@ export class PaylineOverlay extends Container {
    * Highlight winning symbols with a radiating black outline effect.
    * The outline pulses twice then holds.
    */
-  private highlightWinningSymbols(wins: WinLine[], reelSpinners: ReelSpinner[]): void {
+  private highlightWinningSymbols(wins: WinLine[], _reelSpinners: ReelSpinner[]): void {
     // Collect unique (col, row) positions from all wins
     const winCells = new Set<string>();
     for (const win of wins) {
