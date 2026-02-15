@@ -7,6 +7,7 @@ import { RNG } from '../RNG';
 import { ThreeBackground } from '../../threeBackground';
 import { playTarotTearEffects } from './TearEffectHelper';
 import { tween, wait, easeOutCubic, easeOutBack } from '../utils/AnimationUtils';
+import { soundManager } from '../utils/SoundManager';
 
 // ═══════════════════════════════════════════════════════════════
 //  CupsRevealAnimation
@@ -343,9 +344,9 @@ export class CupsRevealAnimation {
         },
       }),
     });
-    text.anchor.set(0.5, 0);
+    text.anchor.set(0.5, 1); // Anchor at bottom-center
     text.x = 0;
-    text.y = this.cellSize * 0.25; // Bottom of cup
+    text.y = this.cellSize / 2; // Stick to bottom border of cell
     container.addChild(text);
 
     const key = `${col},${row}`;
@@ -358,6 +359,7 @@ export class CupsRevealAnimation {
     }, easeOutBack);
 
     container.y = cy; // Snap to final position
+    soundManager.play('land-normal', 0.5);
   }
 
   // ── Spawn multiplier (cup + text) with pop-in animation ──
@@ -410,9 +412,9 @@ export class CupsRevealAnimation {
         },
       }),
     });
-    text.anchor.set(0.5, 0);
+    text.anchor.set(0.5, 1); // Anchor at bottom-center
     text.x = 0;
-    text.y = this.cellSize * 0.25; // Bottom of cup
+    text.y = this.cellSize / 2; // Stick to bottom border of cell
     container.addChild(text);
 
     const key = `${col},${row}`;
@@ -432,6 +434,7 @@ export class CupsRevealAnimation {
 
     container.scale.set(1);
     container.alpha = 1;
+    soundManager.play('land-normal', 0.5);
   }
 
   // ── Update existing multiplier (multiplication animation) ──
@@ -457,6 +460,9 @@ export class CupsRevealAnimation {
       await tween(200, (t) => {
         container.alpha = 1 - t;
       }, easeOutCubic);
+
+      // Play wild reveal sound on multiply
+      soundManager.play('symbol-glow', 0.6);
 
       // Phase 2: Show multiplication popup (e.g., "3×9")
       const multiplierUsed = oldValue > 0 ? newValue / oldValue : newValue;
@@ -644,9 +650,9 @@ export class CupsRevealAnimation {
               },
             },
           });
-          text.anchor.set(0.5, 0);
+          text.anchor.set(0.5, 1); // Anchor at bottom-center
           text.x = 0;
-          text.y = this.cellSize * 0.25;
+          text.y = this.cellSize / 2; // Stick to bottom border of cell
           cellContainer.addChild(text);
           
           container.addChild(cellContainer);
@@ -770,7 +776,8 @@ export class CupsRevealAnimation {
       multiplierText.alpha = t;
     }, easeOutCubic);
 
-    // Count up payout
+    // Count up payout with sound
+    soundManager.startLoop('win-countup', 0.35);
     const countDuration = 1200;
     const start = performance.now();
 
@@ -793,6 +800,7 @@ export class CupsRevealAnimation {
           payoutText.text = `${payout.toFixed(2)} €`;
           payoutText.scale.set(1.2);
           payoutText.alpha = 1;
+          soundManager.stopLoop('win-countup', 0.15);
           resolve();
         }
       };

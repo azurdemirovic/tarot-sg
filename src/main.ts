@@ -12,6 +12,7 @@ import { ThreeBackground } from './threeBackground';
 import { ReelSpinner } from './game/render/ReelSpinner';
 import { TarotTitleDisplay } from './game/render/TarotTitleDisplay';
 import { DEBUG } from './game/config/debug';
+import { DebugMenu } from './game/config/DebugMenu';
 import { soundManager } from './game/utils/SoundManager';
 import { wait } from './game/utils/AnimationUtils';
 
@@ -75,6 +76,15 @@ async function init() {
     const loadingBar = document.getElementById('loading-bar') as HTMLElement;
     const loadingScreen = document.getElementById('loading-screen') as HTMLElement;
 
+    // ── Loading progress: track max so bar only moves forward ──
+    let currentBarPercent = 0;
+    const setBarProgress = (percent: number) => {
+      if (percent > currentBarPercent) {
+        currentBarPercent = percent;
+        loadingBar.style.width = `${Math.round(percent)}%`;
+      }
+    };
+
     // ── Start Three.js 3D model loading EARLY (in parallel with texture loading) ──
     if (DEBUG.BG_ENABLED) {
       const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
@@ -88,7 +98,7 @@ async function init() {
 
         // Track 3D model loading progress (40%–100% of loading bar)
         threeBg.onModelProgress = (progress) => {
-          loadingBar.style.width = `${40 + Math.round(progress * 60)}%`;
+          setBarProgress(40 + progress * 60);
         };
       }
     }
@@ -96,7 +106,7 @@ async function init() {
     // Load PixiJS assets with progress (textures = first 40%)
     assetLoader = new AssetLoader();
     await assetLoader.load((progress) => {
-      loadingBar.style.width = `${Math.round(progress * 40)}%`;
+      setBarProgress(progress * 40);
     });
 
     console.log('✅ Assets loaded');
@@ -151,6 +161,9 @@ async function init() {
     betMinusBtn.addEventListener('click', () => changeBet(-1));
     betPlusBtn.addEventListener('click', () => changeBet(1));
     updateBetUI();
+
+    // ── Debug menu (toggle with ` key) ──
+    new DebugMenu();
 
     console.log('✅ Game ready! Canvas size:', app.canvas.width, 'x', app.canvas.height);
     
@@ -297,36 +310,30 @@ async function handleSpin() {
   canSkip = false;
   featureSoundPlayed = false; // Reset for this spin
 
-  // Debug: Force feature if enabled (only on first spin)
+  // Debug: Force feature if enabled (works every spin when toggled in debug menu)
   let spinOutput: SpinOutput;
-  if (!hasSpunOnce && DEBUG.FORCE_CUPS) {
-    console.log('🔧 DEBUG: Forcing Cups feature (first spin only)');
-    hasSpunOnce = true;
+  if (DEBUG.FORCE_CUPS) {
+    console.log('🔧 DEBUG: Forcing Cups feature');
     spinOutput = gameController.forceTarotSpin('T_CUPS', DEBUG.CUPS_COLUMNS);
-  } else if (!hasSpunOnce && DEBUG.FORCE_LOVERS) {
-    console.log('🔧 DEBUG: Forcing Lovers feature (first spin only)');
-    hasSpunOnce = true;
+  } else if (DEBUG.FORCE_LOVERS) {
+    console.log('🔧 DEBUG: Forcing Lovers feature');
     spinOutput = gameController.forceTarotSpin('T_LOVERS', DEBUG.LOVERS_COLUMNS);
-  } else if (!hasSpunOnce && DEBUG.FORCE_PRIESTESS) {
-    console.log('🔧 DEBUG: Forcing Priestess feature (first spin only)');
-    hasSpunOnce = true;
+  } else if (DEBUG.FORCE_PRIESTESS) {
+    console.log('🔧 DEBUG: Forcing Priestess feature');
     spinOutput = gameController.forceTarotSpin('T_PRIESTESS', DEBUG.PRIESTESS_COLUMNS);
-  } else if (!hasSpunOnce && DEBUG.FORCE_DEATH) {
-    console.log('🔧 DEBUG: Forcing Death feature (first spin only)');
-    hasSpunOnce = true;
+  } else if (DEBUG.FORCE_DEATH) {
+    console.log('🔧 DEBUG: Forcing Death feature');
     spinOutput = gameController.forceTarotSpin('T_DEATH', DEBUG.DEATH_COLUMNS);
-  } else if (!hasSpunOnce && DEBUG.FORCE_FOOL_BIG_WIN) {
-    console.log('🔧 DEBUG: Forcing Fool BIG WIN feature (first spin only)');
-    hasSpunOnce = true;
+  } else if (DEBUG.FORCE_FOOL_BIG_WIN) {
+    console.log('🔧 DEBUG: Forcing Fool BIG WIN feature');
     spinOutput = gameController.forceFoolBigWin(DEBUG.FOOL_BIG_WIN_COLUMNS);
-  } else if (!hasSpunOnce && DEBUG.FORCE_FOOL) {
-    console.log('🔧 DEBUG: Forcing Fool feature (first spin only)');
-    hasSpunOnce = true;
+  } else if (DEBUG.FORCE_FOOL) {
+    console.log('🔧 DEBUG: Forcing Fool feature');
     spinOutput = gameController.forceTarotSpin('T_FOOL', DEBUG.FOOL_COLUMNS);
   } else {
     spinOutput = gameController.spin();
-    hasSpunOnce = true;
   }
+  hasSpunOnce = true;
   currentSpinData = spinOutput;
 
   // After 0.25s, unlock button for hurry-up (but not during features or title card)
