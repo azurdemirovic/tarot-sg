@@ -29,7 +29,6 @@ export class ThreeBackground {
   private camera: THREE.PerspectiveCamera;
   private bgGroup: THREE.Group;
   private clock: THREE.Clock;
-  private _animateCamera: boolean; // Reserved for future camera animation
   private animationId: number = 0;
   
   // Feature color tinting
@@ -94,7 +93,6 @@ export class ThreeBackground {
 
   // Lovers model (appears during Lovers feature only)
   private loversModel: THREE.Object3D | null = null;
-  private loversMixer: THREE.AnimationMixer | null = null;
   private isLoversSwapped: boolean = false;
   private loversReady: boolean = false;
   private loversBaseY: number = 0; // Set after loading
@@ -118,7 +116,6 @@ export class ThreeBackground {
 
   
   constructor(options: ThreeBgOptions) {
-    this._animateCamera = options.animate;
     this.clock = new THREE.Clock();
 
     // Create promises for loading milestones
@@ -374,7 +371,7 @@ export class ThreeBackground {
         }
 
         console.log(
-          `✅ 3D background loaded: ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)} → scaled ${scale.toFixed(3)}`
+          `✅ 3D background loaded: ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)} → scaled ${model.scale.x.toFixed(3)}`
         );
         this._resolveMainModelReady();
         this._onModelLoaded();
