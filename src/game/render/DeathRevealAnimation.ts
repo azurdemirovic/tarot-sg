@@ -15,6 +15,7 @@
  */
 
 import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
+import { SpinCounterUI } from './SpinCounterUI';
 import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { DeathResult, DeathSpinResult } from '../logic/TarotFeatureProcessor';
@@ -31,7 +32,7 @@ export class DeathRevealAnimation {
   // @ts-ignore -- tracked for potential future use
   private hurryUpRequested: boolean = false;
   private reelSpinActive: boolean = false;
-  private spinCounterText: Text | null = null;
+  private spinCounterUI: SpinCounterUI | null = null;
   private reapBarContainer: Container | null = null;
   private reapBarFill: Graphics | null = null;
   private reapBarText: Text | null = null;
@@ -89,6 +90,7 @@ export class DeathRevealAnimation {
 
     // Mount overlay for UI elements
     this.parent.addChild(this.overlayContainer);
+    this.spinCounterUI = new SpinCounterUI('T_DEATH');
 
     try {
       // ── Phase A: Tear away Death tarot columns ──
@@ -104,7 +106,7 @@ export class DeathRevealAnimation {
         const spinNum = deathResult.spinsTotal - deathResult.spinsRemaining + 1;
 
         // Show spin counter
-        await this.showSpinCounter(spinNum, deathResult.spinsTotal, totalWidth);
+        this.spinCounterUI?.update(spinNum, deathResult.spinsTotal);
 
         // Clear previous sticky WILD overlays before spinning
         this.clearStickyWildOverlays();
@@ -239,6 +241,8 @@ export class DeathRevealAnimation {
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
       winTracker.dispose();
+      this.spinCounterUI?.dispose();
+      this.spinCounterUI = null;
       // Cleanup
       this.cleanupOverlay();
     }
@@ -551,33 +555,6 @@ export class DeathRevealAnimation {
     expandText.destroy();
   }
 
-  // ── Spin Counter Display ──
-  private async showSpinCounter(spinNum: number, total: number, totalWidth: number): Promise<void> {
-    if (this.spinCounterText) {
-      this.overlayContainer.removeChild(this.spinCounterText);
-      this.spinCounterText.destroy();
-    }
-
-    this.spinCounterText = new Text({
-      text: `DEATH SPINS ${spinNum} / ${total}`,
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 22,
-        fill: 0xff4444,
-        stroke: { color: 0x000000, width: 3 },
-      }),
-    });
-    this.spinCounterText.anchor.set(0.5, 0);
-    this.spinCounterText.x = totalWidth / 2;
-    this.spinCounterText.y = -40;
-    this.overlayContainer.addChild(this.spinCounterText);
-
-    // Brief flash animation
-    await tween(300, (t) => {
-      this.spinCounterText!.alpha = t;
-      this.spinCounterText!.scale.set(0.8 + 0.2 * t);
-    }, easeOutCubic);
-  }
 
   // ── Sticky WILD overlays ──
   private showStickyWildOverlays(_stickyWilds: { col: number; row: number }[]): void {
@@ -593,10 +570,6 @@ export class DeathRevealAnimation {
 
   // ── Cleanup ──
   private cleanupOverlay(): void {
-    if (this.spinCounterText) {
-      this.spinCounterText.destroy();
-      this.spinCounterText = null;
-    }
     if (this.reapBarContainer) {
       this.reapBarContainer.destroy({ children: true });
       this.reapBarContainer = null;

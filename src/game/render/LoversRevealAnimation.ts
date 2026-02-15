@@ -1,4 +1,5 @@
 import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
+import { SpinCounterUI } from './SpinCounterUI';
 import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid } from '../Types';
 import { LoversResult, LoversSpinResult } from '../logic/TarotFeatureProcessor';
@@ -21,7 +22,7 @@ export class LoversRevealAnimation {
   private dimGraphic: Graphics;
   private glowContainer: Container;
   private cardContainer: Container;
-  private spinCounterText: Text | null = null;
+  private spinCounterUI: SpinCounterUI | null = null;
 
   constructor(
     private parent: Container,
@@ -53,18 +54,23 @@ export class LoversRevealAnimation {
       multiplier: number;
     },
     onGenerateFreshGrid: () => Grid,
-    betAmount: number
-  ): Promise<void> {
+    betAmount: number,
+    onGenerateCandidates?: () => string[],
+    onShowPaylines?: (wins: any[]) => void,
+    onClearPaylines?: () => void
+  ): Promise<number> {
     const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
     const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
 
     // Persistent "WON" total display below the frame
     const winTracker = new FeatureWinTracker();
+    let totalPayout = 0;
 
     // Mount overlay layers
     this.parent.addChild(this.overlay);
     this.overlay.addChild(this.glowContainer);
     this.overlay.addChild(this.cardContainer);
+    this.spinCounterUI = new SpinCounterUI('T_LOVERS');
 
     try {
       // Phase A — Hide Lovers tarot columns (tear starts immediately)
@@ -79,11 +85,11 @@ export class LoversRevealAnimation {
       while (loversResult.spinsRemaining > 0) {
         const spinNum = loversResult.spinsTotal - loversResult.spinsRemaining + 1;
 
-        // Show spin counter on overlay
-        await this.showSpinCounter(spinNum, loversResult.spinsTotal, totalWidth);
+        // Show spin counter
+        this.spinCounterUI?.update(spinNum, loversResult.spinsTotal);
 
         // C1: Card pick — show 3 card backs, player picks one → flip reveal
-        const candidates = this.generateCandidates();
+        const candidates = onGenerateCandidates ? onGenerateCandidates() : this.generateCandidates();
         loversResult.currentSpin = {
           bondSymbolId: '',
           candidateSymbols: candidates,
@@ -112,10 +118,17 @@ export class LoversRevealAnimation {
 
         // C5: Accumulate payout and update persistent WON display
         if (result.wins.length > 0 && result.totalWin > 0) {
+          totalPayout += result.totalWin;
           await winTracker.addWin(result.totalWin);
         }
 
-        // C6: Show per-spin win using WinDisplay (only if win > 10× bet)
+        // C6: Show payline outlines on winning symbols, then per-spin win display
+        if (result.wins.length > 0 && result.totalWin > 0 && onShowPaylines) {
+          onShowPaylines(result.wins);
+          await wait(800);
+        }
+        if (onClearPaylines) onClearPaylines();
+
         const winDisplay = new WinDisplay(this.parent);
         await winDisplay.show(result.wins, result.multiplier, result.totalWin, betAmount, totalWidth, totalHeight);
 
@@ -123,8 +136,12 @@ export class LoversRevealAnimation {
       }
     } finally {
       winTracker.dispose();
+      this.spinCounterUI?.dispose();
+      this.spinCounterUI = null;
       this.cleanup();
     }
+
+    return totalPayout;
   }
 
   // ── Phase A: Hide Lovers tarot columns (with tear effect) ──
@@ -493,41 +510,9 @@ export class LoversRevealAnimation {
     spawnDarkParticleGlow(this.glowContainer, col, row, this.cellSize, this.padding);
   }
 
-  // ── Spin Counter Display ─────────────────────────────────
-  private async showSpinCounter(spinNum: number, total: number, totalWidth: number): Promise<void> {
-    // Remove any previous counter
-    if (this.spinCounterText) {
-      this.overlay.removeChild(this.spinCounterText);
-      this.spinCounterText.destroy();
-    }
-
-    this.spinCounterText = new Text({
-      text: `SPINS REMAINING ${spinNum} / ${total}`,
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 22,
-        fill: 0xFF69B4,
-        stroke: { color: 0x000000, width: 3 },
-      }),
-    });
-    this.spinCounterText.anchor.set(0.5, 0);
-    this.spinCounterText.x = totalWidth / 2;
-    this.spinCounterText.y = -40;
-    this.overlay.addChild(this.spinCounterText);
-
-    // Brief flash animation
-    await tween(300, (t) => {
-      this.spinCounterText!.alpha = t;
-      this.spinCounterText!.scale.set(0.8 + 0.2 * t);
-    }, easeOutCubic);
-  }
 
   // ── Cleanup ────────────────────────────────────────────
   private cleanup(): void {
-    if (this.spinCounterText) {
-      this.spinCounterText.destroy();
-      this.spinCounterText = null;
-    }
     this.cardContainer.removeChildren();
     this.dimGraphic.clear();
     this.parent.removeChild(this.overlay);

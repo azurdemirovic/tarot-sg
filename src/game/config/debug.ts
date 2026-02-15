@@ -53,4 +53,10 @@ export const DEBUG = {
 
   /** Death visual mode — keeps the Death UI (reap bar, spin counter, 3D model, color tint) active at all times */
   DEATH_MODE: false,
+
+  /** Force 2 tarots to land (for testing anticipation — may or may not trigger a feature) */
+  FORCE_2_TAROTS: false,
+
+  /** Force 3 tarots to land (for testing anticipation — will always trigger a feature) */
+  FORCE_3_TAROTS: false,
 };

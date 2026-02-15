@@ -59,6 +59,8 @@ export interface DeathResult {
   gridCols: number;              // current grid width (starts 5)
   gridRows: number;              // current grid height (starts 3)
   stickyWilds: { col: number; row: number }[];  // positions of sticky WILDs that persist across spins
+  deathPool?: { id: string; baseWeight: number }[];  // reduced symbol pool for clustering
+  deathWeights?: number[];
 }
 
 export interface DeathCluster {
@@ -130,9 +132,9 @@ export class TarotFeatureProcessor {
   /**
    * Apply the Fool feature to the grid.
    *
-   * 2 Fools → 1-3 wilds per column (equal weight), ×3 multiplier
-   * 3+ Fools → 1-3 wilds per column (bias 2-3), ×5 multiplier
-   * Wild cap: 9 total
+   * 2 Fools → 1-2 wilds per column (bias 1), ×2 multiplier
+   * 3+ Fools → 1-3 wilds per column (bias 1-2), ×3 multiplier
+   * Wild cap: 6 total
    */
   applyFool(grid: Grid, trigger: FeatureTrigger): FoolResult {
     const rows = grid[0].length; // 3
@@ -143,22 +145,22 @@ export class TarotFeatureProcessor {
     const perColWilds: number[] = [];
     for (let i = 0; i < trigger.columns.length; i++) {
       if (trigger.count === 2) {
-        // Equal weight 1, 2, or 3
-        perColWilds.push(this.rng.nextInt(1, 3));
+        // 2 Fools: 1 wild (70%), 2 wilds (30%)
+        perColWilds.push(this.rng.nextFloat() < 0.70 ? 1 : 2);
       } else {
-        // 3+ Fools: bias toward 2-3 (1=20%, 2=40%, 3=40%)
+        // 3+ Fools: 1 wild (40%), 2 wilds (40%), 3 wilds (20%)
         const roll = this.rng.nextFloat();
-        if (roll < 0.20) perColWilds.push(1);
-        else if (roll < 0.60) perColWilds.push(2);
+        if (roll < 0.40) perColWilds.push(1);
+        else if (roll < 0.80) perColWilds.push(2);
         else perColWilds.push(3);
       }
     }
 
-    // 2. Enforce 9-wild cap
+    // 2. Enforce 6-wild cap
     let totalWilds = perColWilds.reduce((s, v) => s + v, 0);
-    if (totalWilds > 9) {
+    if (totalWilds > 6) {
       // Trim excess from last columns
-      let excess = totalWilds - 9;
+      let excess = totalWilds - 6;
       for (let i = perColWilds.length - 1; i >= 0 && excess > 0; i--) {
         const reduce = Math.min(excess, perColWilds[i] - 1); // Keep at least 1
         perColWilds[i] -= reduce;
@@ -191,8 +193,8 @@ export class TarotFeatureProcessor {
       }
     });
 
-    // 4. Multiplier
-    const multiplier = trigger.count >= 3 ? 5 : 3;
+    // 4. Multiplier — modest: Fool is frequent but low-pay
+    const multiplier = trigger.count >= 3 ? 3 : 2;
 
     console.log(`🃏 Fool Feature: ${trigger.count} Fools → ${totalWilds} WILDs, ×${multiplier} multiplier`);
 
@@ -206,21 +208,21 @@ export class TarotFeatureProcessor {
    * 3 Cups → 6-9 initial multiplier cells (2-3 per column)
    * 
    * Initial multiplier values:
-   * - 2 Cups: Lower range (2x, 3x)
-   * - 3 Cups: Higher range (3x, 5x, 10x)
+   * - 2 Cups: Moderate range (3x, 5x, 8x)
+   * - 3 Cups: Higher range (5x, 10x, 15x, 25x)
    */
   applyCups(grid: Grid, trigger: FeatureTrigger): CupsResult {
     const rows = grid[0].length; // 3
 
     // 1. Roll multiplier count per column
     const perColMultipliers: number[] = [];
-    const multiplierPool2Cups = [2, 3];
-    const multiplierPool3Cups = [3, 5, 10];
+    const multiplierPool2Cups = [3, 5, 8];
+    const multiplierPool3Cups = [5, 10, 15, 25];
 
     for (let i = 0; i < trigger.columns.length; i++) {
       if (trigger.count === 2) {
-        // 2 Cups: 1-2 multipliers per column
-        perColMultipliers.push(this.rng.nextInt(1, 2));
+        // 2 Cups: 1-3 multipliers per column
+        perColMultipliers.push(this.rng.nextInt(1, 3));
       } else {
         // 3 Cups: 2-3 multipliers per column
         perColMultipliers.push(this.rng.nextInt(2, 3));
@@ -314,12 +316,12 @@ export class TarotFeatureProcessor {
    * Area ranges from 1×1 to 5×3, biased toward smaller areas for balanced RTP.
    * 
    * Rarity tiers (area = width × height):
-   *   Tiny (1×1):        15%
-   *   Small (2×1, 1×2):  25%
+   *   Tiny (1×1):        8%
+   *   Small (2×1, 1×2):  17%
    *   Medium (2×2, 3×1): 30%
-   *   Large (3×2, 2×3):  18%
-   *   Huge (4×2, 3×3):   9%
-   *   Full (5×2, 4×3):   3%
+   *   Large (3×2, 2×3):  23%
+   *   Huge (4×2, 3×3):   15%
+   *   Full (5×2, 4×3):   7%
    */
   private rollAnchorPositions(cols: number, rows: number): { malePos: { col: number; row: number }; femalePos: { col: number; row: number } } {
     // Roll area tier
@@ -327,22 +329,22 @@ export class TarotFeatureProcessor {
     let targetWidth: number;
     let targetHeight: number;
 
-    if (roll < 0.15) {
+    if (roll < 0.08) {
       // Tiny: 1×1
       targetWidth = 1; targetHeight = 1;
-    } else if (roll < 0.40) {
+    } else if (roll < 0.25) {
       // Small: 2×1 or 1×2
       if (this.rng.nextFloat() < 0.5) { targetWidth = 2; targetHeight = 1; }
       else { targetWidth = 1; targetHeight = 2; }
-    } else if (roll < 0.70) {
+    } else if (roll < 0.55) {
       // Medium: 2×2 or 3×1
       if (this.rng.nextFloat() < 0.5) { targetWidth = 2; targetHeight = 2; }
       else { targetWidth = 3; targetHeight = 1; }
-    } else if (roll < 0.88) {
+    } else if (roll < 0.78) {
       // Large: 3×2 or 2×3
       if (this.rng.nextFloat() < 0.5) { targetWidth = 3; targetHeight = 2; }
       else { targetWidth = 2; targetHeight = 3; }
-    } else if (roll < 0.97) {
+    } else if (roll < 0.93) {
       // Huge: 4×2 or 3×3
       if (this.rng.nextFloat() < 0.5) { targetWidth = 4; targetHeight = 2; }
       else { targetWidth = 3; targetHeight = 3; }
@@ -407,13 +409,14 @@ export class TarotFeatureProcessor {
     const rows = grid[0].length;
     const cols = grid.length;
 
-    // 1. Roll mystery cover count — weighted: 1 common, 2 rare, 3 very rare
-    // Weights: 1→70%, 2→22%, 3→8%
+    // 1. Roll mystery cover count — more generous for bigger board coverage
+    // Weights: 1→30%, 2→35%, 3→25%, 4→10%
     const countRoll = this.rng.nextFloat();
     let coverCount: number;
-    if (countRoll < 0.70) coverCount = 1;
-    else if (countRoll < 0.92) coverCount = 2;
-    else coverCount = 3;
+    if (countRoll < 0.30) coverCount = 1;
+    else if (countRoll < 0.65) coverCount = 2;
+    else if (countRoll < 0.90) coverCount = 3;
+    else coverCount = 4;
 
     // 2. Select random cells that aren't already persistent mystery cells
     const occupiedSet = new Set(
@@ -475,7 +478,15 @@ export class TarotFeatureProcessor {
   applyDeath(_grid: Grid, trigger: FeatureTrigger): DeathResult {
     const spinsTotal = 10;
 
-    console.log(`💀 Death Feature: ${trigger.count} Death → ${spinsTotal} spins`);
+    // Build a reduced symbol pool (5 random normal symbols + WILD) for more clustering
+    const DEATH_POOL_SIZE = 5;
+    const normalSymbols = this.assetLoader.getNormalSymbols().filter(s => s.id !== 'WILD');
+    const shuffled = this.rng.shuffle([...normalSymbols]);
+    const deathPool = shuffled.slice(0, DEATH_POOL_SIZE);
+    deathPool.push(this.assetLoader.getSymbol('WILD')!);
+    const deathWeights = deathPool.map(s => s.id === 'WILD' ? 10 : s.baseWeight);
+
+    console.log(`💀 Death Feature: ${trigger.count} Death → ${spinsTotal} spins, pool: [${deathPool.map(s => s.id).join(', ')}]`);
 
     return {
       spinsTotal,
@@ -487,7 +498,34 @@ export class TarotFeatureProcessor {
       gridCols: 5,
       gridRows: 3,
       stickyWilds: [],
+      deathPool,
+      deathWeights,
     };
+  }
+
+  /**
+   * Generate a fresh grid using the Death reduced symbol pool for more clustering.
+   */
+  generateDeathGrid(deathResult: DeathResult): Grid {
+    const cols = deathResult.gridCols;
+    const rows = deathResult.gridRows;
+    const pool = deathResult.deathPool ?? this.assetLoader.getNormalSymbols();
+    const weights = deathResult.deathWeights ?? pool.map(s => s.baseWeight);
+    const grid: Grid = [];
+    for (let c = 0; c < cols; c++) {
+      grid[c] = [];
+      for (let r = 0; r < rows; r++) {
+        const sym = this.rng.weightedChoice(pool, weights);
+        grid[c][r] = { col: c, row: r, symbolId: sym.id };
+      }
+    }
+    // Place sticky WILDs
+    for (const wild of deathResult.stickyWilds) {
+      if (wild.col < cols && wild.row < rows) {
+        grid[wild.col][wild.row] = { col: wild.col, row: wild.row, symbolId: 'WILD' };
+      }
+    }
+    return grid;
   }
 
   /**
@@ -618,9 +656,9 @@ export class TarotFeatureProcessor {
   /**
    * Calculate cluster-based payout for a slashed cluster.
    * Payout scales with cluster size and symbol tier:
-   *   LOW:     3=×0.5  4=×2   5=×5   6+=×10
-   *   PREMIUM: 3=×1    4=×5   5=×15  6+=×30
-   *   WILD:    3=×2    4=×10  5=×25  6+=×50
+   *   LOW:     3=×0.8  4=×3   5=×8   6+=×15
+   *   PREMIUM: 3=×2    4=×8   5=×20  6+=×40
+   *   WILD:    3=×3    4=×12  5=×30  6+=×60
    */
   private calculateClusterPayout(symbolId: string, clusterSize: number, betAmount: number): DeathClusterWin {
     const sym = this.assetLoader.getSymbol(symbolId);
@@ -629,21 +667,21 @@ export class TarotFeatureProcessor {
     let payMultiplier: number;
 
     if (tier === 'PREMIUM') {
-      if (clusterSize >= 6) payMultiplier = 30;
-      else if (clusterSize === 5) payMultiplier = 15;
-      else if (clusterSize === 4) payMultiplier = 5;
-      else payMultiplier = 1;
-    } else if (tier === 'WILD') {
-      if (clusterSize >= 6) payMultiplier = 50;
-      else if (clusterSize === 5) payMultiplier = 25;
-      else if (clusterSize === 4) payMultiplier = 10;
+      if (clusterSize >= 6) payMultiplier = 40;
+      else if (clusterSize === 5) payMultiplier = 20;
+      else if (clusterSize === 4) payMultiplier = 8;
       else payMultiplier = 2;
+    } else if (tier === 'WILD') {
+      if (clusterSize >= 6) payMultiplier = 60;
+      else if (clusterSize === 5) payMultiplier = 30;
+      else if (clusterSize === 4) payMultiplier = 12;
+      else payMultiplier = 3;
     } else {
       // LOW and anything else
-      if (clusterSize >= 6) payMultiplier = 10;
-      else if (clusterSize === 5) payMultiplier = 5;
-      else if (clusterSize === 4) payMultiplier = 2;
-      else payMultiplier = 0.5;
+      if (clusterSize >= 6) payMultiplier = 15;
+      else if (clusterSize === 5) payMultiplier = 8;
+      else if (clusterSize === 4) payMultiplier = 3;
+      else payMultiplier = 0.8;
     }
 
     return {
@@ -725,11 +763,12 @@ export class TarotFeatureProcessor {
     const reaped = allSlashedCells.length;
     deathResult.reapBar += reaped;
 
-    // 6. Determine which slashed cells leave a sticky WILD behind (~15% chance)
-    const WILD_CHANCE = 0.15;
+    // 6. Determine which slashed cells leave a sticky WILD behind (~20% chance)
+    const WILD_CHANCE = 0.20;
     const newStickyWilds: { col: number; row: number }[] = [];
-    const normalSymbols = this.assetLoader.getNormalSymbols();
-    const normalWeights = normalSymbols.map(s => s.baseWeight);
+    // Use reduced death pool for refills if available, otherwise fallback to normal
+    const normalSymbols = deathResult.deathPool ?? this.assetLoader.getNormalSymbols();
+    const normalWeights = deathResult.deathWeights ?? normalSymbols.map(s => s.baseWeight);
     const refillCells: { col: number; row: number; symbolId: string }[] = [];
 
     for (const cell of allSlashedCells) {

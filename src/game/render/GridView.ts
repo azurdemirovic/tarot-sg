@@ -3,6 +3,7 @@ import { AssetLoader } from '../AssetLoader';
 import { Grid, TarotColumn } from '../Types';
 import { ReelSpinner } from './ReelSpinner';
 import { DEBUG } from '../config/debug';
+import { soundManager } from '../utils/SoundManager';
 
 export class GridView extends Container {
   private cellSize: number = 156; // 120 * 1.3
@@ -156,6 +157,10 @@ export class GridView extends Container {
   private pendingStopTimers: ReturnType<typeof setTimeout>[] = [];
   private spinDoneResolve: (() => void) | null = null;
   private onReelLandCallback: ((col: number) => void) | null = null;
+  private anticipationPulse: Graphics | null = null;
+  private anticipationPulseAnim: number | null = null;
+  private landedTarotCount: number = 0;
+  private currentTarotColSet: Set<number> = new Set();
 
   /** Set a callback that fires when each reel lands (col index passed). */
   setOnReelLand(callback: ((col: number) => void) | null): void {
@@ -164,48 +169,260 @@ export class GridView extends Container {
 
   async spinToGrid(grid: Grid, tarotColumns: TarotColumn[] = []): Promise<void> {
     this.isAnimating = true;
+    this.landedTarotCount = 0;
+    // Build tarot col set for quick lookup
+    this.currentTarotColSet = new Set(tarotColumns.map(tc => tc.col));
+
+    // Collect all cardback IDs for anticipation teasers
+    const allCardbackIds = ['CARDBACK_FOOL', 'CARDBACK_CUPS', 'CARDBACK_LOVERS', 'CARDBACK_PRIESTESS', 'CARDBACK_DEATH']
+      .filter(id => this.assetLoader.getTexture(id));
     
-    // Build a map: col → tarotType for quick lookup
-    const tarotColMap = new Map(tarotColumns.map(tc => [tc.col, tc.tarotType]));
-    
+    // Build a map: col → tarotType for cardback lookup during spin start
+    const tarotTypeByCol = new Map(tarotColumns.map(tc => [tc.col, tc.tarotType]));
+
     // Start all reels spinning — tarot columns get cardback IDs
     this.reelSpinners.forEach((reel, col) => {
       const symbolIds = grid[col].map(cell => cell.symbolId);
-      const tarotType = tarotColMap.get(col);
+      const tarotType = tarotTypeByCol.get(col);
       const isTarot = !!tarotType;
       const cardbackId = tarotType ? this.assetLoader.getCardbackId(tarotType) : undefined;
       reel.startSpin(symbolIds, isTarot, cardbackId);
     });
     
     // Wait until ALL reels have fully settled (stopped + bounce done)
-    // This promise resolves regardless of natural or hurried stops
     await new Promise<void>((resolve) => {
       this.spinDoneResolve = resolve;
       
-      // Schedule natural stops: left-to-right, 200ms apart
-      this.scheduleNaturalStops(1000, 200, 0.7);
+      // Schedule natural stops with anticipation awareness
+      this.scheduleAnticipationStops(1000, 200, 0.7, allCardbackIds);
       
       // Poll: resolve once every reel is fully settled
       const checkAllDone = () => {
         const allSettled = this.reelSpinners.every(reel => !reel.getIsSpinning());
         if (allSettled) {
+          this.stopAnticipationPulse();
           this.spinDoneResolve = null;
           resolve();
         } else {
           requestAnimationFrame(checkAllDone);
         }
       };
-      // Start checking after first reel could possibly stop
       setTimeout(checkAllDone, 800);
     });
     
     this.isAnimating = false;
   }
 
+  /**
+   * Schedule reel stops with anticipation awareness.
+   * When a tarot lands, remaining reels slow down and land one-by-one
+   * left to right — each reel waits for the previous one to fully settle
+   * before beginning its own deceleration.
+   */
+  private scheduleAnticipationStops(
+    baseDelay: number,
+    stagger: number,
+    intensity: number,
+    cardbackIds: string[]
+  ): void {
+    this.pendingStopTimers.forEach(t => clearTimeout(t));
+    this.pendingStopTimers = [];
+
+    let cumulativeDelay = baseDelay;
+
+    for (let colIdx = 0; colIdx < this.reelSpinners.length; colIdx++) {
+      const col = colIdx;
+      const timer = setTimeout(() => {
+        const reel = this.reelSpinners[col];
+        reel.exitAnticipation();
+        reel.requestStop(0, intensity);
+
+        if (this.onReelLandCallback) {
+          this.onReelLandCallback(col);
+        }
+
+        // Check if this reel had a tarot
+        if (this.currentTarotColSet.has(col)) {
+          this.landedTarotCount++;
+
+          // Cancel remaining scheduled stops and reschedule with anticipation
+          const remainingCols = [];
+          for (let i = col + 1; i < this.reelSpinners.length; i++) {
+            if (this.reelSpinners[i].isStillScrolling()) {
+              remainingCols.push(i);
+            }
+          }
+
+          if (remainingCols.length > 0) {
+            // Cancel all pending timers for remaining reels
+            this.pendingStopTimers = this.pendingStopTimers.filter(t => {
+              clearTimeout(t);
+              return false;
+            });
+
+            // Enter anticipation on remaining reels
+            const level = this.landedTarotCount; // 1 or 2
+            for (const rc of remainingCols) {
+              this.reelSpinners[rc].enterAnticipation(level, cardbackIds);
+            }
+
+            // Start pulse effect
+            this.startAnticipationPulse(level);
+
+            // Play anticipation sound (looping — stopped when all reels land)
+            soundManager.startLoop('anticipation', level === 1 ? 0.4 : 0.6);
+
+            // Chain remaining reels sequentially: each waits for the previous
+            // to fully land before starting its own deceleration
+            this.chainAnticipationStops(remainingCols, level, intensity, cardbackIds);
+          }
+        }
+      }, cumulativeDelay);
+
+      this.pendingStopTimers.push(timer);
+      cumulativeDelay += stagger;
+    }
+  }
+
+  /**
+   * Sequentially stop anticipation reels one-by-one, left to right.
+   * Each reel waits for the previous one to fully settle (decelerate + bounce)
+   * before beginning its own stop, creating the dramatic slow-landing cascade.
+   */
+  private chainAnticipationStops(
+    remainingCols: number[],
+    level: number,
+    intensity: number,
+    cardbackIds: string[]
+  ): void {
+    // Initial delay before the first anticipation reel starts landing
+    const initialDelay = level === 1 ? 800 : 1200;
+    // Small pause between one reel finishing and the next starting to stop
+    const gapBetweenReels = level === 1 ? 200 : 350;
+
+    const stopReelsSequentially = async () => {
+      // Wait the initial delay before the first reel starts landing
+      await new Promise<void>(resolve => {
+        const t = setTimeout(resolve, initialDelay);
+        this.pendingStopTimers.push(t);
+      });
+
+      for (let i = 0; i < remainingCols.length; i++) {
+        const rc = remainingCols[i];
+        const reel = this.reelSpinners[rc];
+
+        // If reel was already stopped (e.g. by hurryUp), skip
+        if (!reel.isStillScrolling()) continue;
+
+        // DO NOT call exitAnticipation() before requestStop() —
+        // the reel should keep its slow anticipation speed so that
+        // requestStop() uses the smooth deceleration path.
+        // exitAnticipation() would reset velocity to fast (60), killing the effect.
+
+        // requestStop returns a promise that resolves when the reel fully settles
+        // (including deceleration + bounce)
+        await reel.requestStop(0, intensity);
+
+        // Clean up anticipation visuals AFTER landing
+        reel.exitAnticipation();
+
+        if (this.onReelLandCallback) {
+          this.onReelLandCallback(rc);
+        }
+
+        // Check if THIS reel also had a tarot (escalation!)
+        if (this.currentTarotColSet.has(rc)) {
+          this.landedTarotCount++;
+
+          // Get still-spinning reels after this one
+          const stillRemaining = remainingCols.slice(i + 1).filter(
+            sr => this.reelSpinners[sr].isStillScrolling()
+          );
+
+          if (stillRemaining.length > 0) {
+            // Escalate anticipation on remaining reels
+            for (const sr of stillRemaining) {
+              this.reelSpinners[sr].enterAnticipation(2, cardbackIds);
+            }
+            this.startAnticipationPulse(2);
+            // Restart anticipation loop at higher volume for escalation
+            soundManager.stopLoop('anticipation', 0.1);
+            soundManager.startLoop('anticipation', 0.6);
+
+            // Update the gap for escalated anticipation (more dramatic)
+            // Continue the loop — the escalated reels will be handled
+            // in subsequent iterations with the updated anticipation level
+          }
+        }
+
+        // Small pause before the next reel starts stopping
+        if (i < remainingCols.length - 1) {
+          await new Promise<void>(resolve => {
+            const t = setTimeout(resolve, gapBetweenReels);
+            this.pendingStopTimers.push(t);
+          });
+        }
+      }
+
+      // All anticipation reels have landed — stop the anticipation loop
+      soundManager.stopLoop('anticipation', 0.3);
+    };
+
+    stopReelsSequentially();
+  }
+
+  /** Start a pulsing glow overlay on the grid during anticipation */
+  private startAnticipationPulse(level: number): void {
+    this.stopAnticipationPulse();
+
+    const totalWidth = this.cols * (this.cellSize + this.padding) - this.padding;
+    const totalHeight = this.rows * (this.cellSize + this.padding) - this.padding;
+
+    this.anticipationPulse = new Graphics();
+    this.anticipationPulse.zIndex = 90; // Below frame (100) but above bg
+    this.addChild(this.anticipationPulse);
+
+    const color = 0x000000; // Black pulse
+    const maxAlpha = level === 1 ? 0.15 : 0.30;
+
+    let time = 0;
+    const animate = () => {
+      if (!this.anticipationPulse) return;
+      time += 0.04;
+      const alpha = maxAlpha * (0.5 + 0.5 * Math.sin(time * 3)); // Pulsing
+
+      this.anticipationPulse.clear();
+      // Border glow
+      this.anticipationPulse.rect(-10, -10, totalWidth + 20, totalHeight + 20);
+      this.anticipationPulse.fill({ color, alpha });
+      // Inner clear (just the border glows)
+      this.anticipationPulse.rect(5, 5, totalWidth - 10, totalHeight - 10);
+      this.anticipationPulse.fill({ color: 0x000000, alpha: 0 });
+
+      this.anticipationPulseAnim = requestAnimationFrame(animate);
+    };
+    this.anticipationPulseAnim = requestAnimationFrame(animate);
+  }
+
+  /** Stop the anticipation pulse effect */
+  private stopAnticipationPulse(): void {
+    if (this.anticipationPulseAnim) {
+      cancelAnimationFrame(this.anticipationPulseAnim);
+      this.anticipationPulseAnim = null;
+    }
+    if (this.anticipationPulse) {
+      this.removeChild(this.anticipationPulse);
+      this.anticipationPulse.destroy();
+      this.anticipationPulse = null;
+    }
+  }
+
   hurryUp(): void {
     // Cancel pending natural stop timers
     this.pendingStopTimers.forEach(t => clearTimeout(t));
     this.pendingStopTimers = [];
+    this.stopAnticipationPulse();
+    soundManager.stopLoop('anticipation', 0.1);
     
     // Rapid-fire stop remaining scrolling reels (60ms apart)
     let delay = 0;
@@ -213,6 +430,7 @@ export class GridView extends Container {
       if (reel.isStillScrolling()) {
         const timer = setTimeout(() => {
           if (reel.isStillScrolling()) {
+            reel.exitAnticipation();
             reel.requestStop(0, 0.7);
             if (this.onReelLandCallback) {
               this.onReelLandCallback(col);
@@ -223,30 +441,16 @@ export class GridView extends Container {
         delay += 60;
       }
     });
-    // The spinToGrid() poll will detect settlement and resolve naturally
   }
   
-  private scheduleNaturalStops(baseDelay: number, stagger: number, intensity: number): void {
-    this.pendingStopTimers.forEach(t => clearTimeout(t));
-    this.pendingStopTimers = [];
-    
-    this.reelSpinners.forEach((reel, col) => {
-      const delay = baseDelay + col * stagger;
-      const timer = setTimeout(() => {
-        reel.requestStop(0, intensity);
-        if (this.onReelLandCallback) {
-          this.onReelLandCallback(col);
-        }
-      }, delay);
-      this.pendingStopTimers.push(timer);
-    });
-  }
   
   forceReset(): void {
     this.pendingStopTimers.forEach(t => clearTimeout(t));
     this.pendingStopTimers = [];
+    this.stopAnticipationPulse();
+    soundManager.stopLoop('anticipation', 0);
     this.isAnimating = false;
-    this.reelSpinners.forEach(reel => reel.skipToResult());
+    this.reelSpinners.forEach(reel => { reel.exitAnticipation(); reel.skipToResult(); });
     if (this.spinDoneResolve) {
       this.spinDoneResolve();
       this.spinDoneResolve = null;

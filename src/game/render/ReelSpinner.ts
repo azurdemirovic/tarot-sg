@@ -20,6 +20,15 @@ export class ReelSpinner extends Container {
   private bounceVelocity: number = 0;
   private bounceTime: number = 0;
 
+  // Deceleration landing
+  private decelerating: boolean = false;
+  private decelResolve: (() => void) | null = null;
+  private decelIntensity: number = 0.8;
+
+  // Anticipation mode
+  private baseVelocity: number = 60;
+  private wasInAnticipation: boolean = false;
+
   /** @deprecated No longer needed — sounds are preloaded via SoundManager. */
   static async loadLandSound(): Promise<void> {}
 
@@ -79,8 +88,8 @@ export class ReelSpinner extends Container {
     
     // Build strip: final symbols FIRST, then filler AFTER
     // This way scrollOffset goes from negative (showing filler) to 0 (showing final)
-    // Use enough filler so we never need to loop (avoids visual glitch)
-    const fillerCount = 50;
+    // Use enough filler so we never run out during long anticipation waits
+    const fillerCount = 200;
     const fillerSymbols: string[] = [];
     
     const normalSymbols = this.assetLoader.getNormalSymbols();
@@ -121,32 +130,62 @@ export class ReelSpinner extends Container {
           return;
         }
 
-        // Instant stop + bounce
-        this.scrollOffset = this.targetOffset;
-        this.isSpinning = false;
-        this.playLandSound();
-        this.startBounce(intensity);
-        
-        // Wait for bounce to finish
-        const checkBounce = () => {
-          if (!this.bouncing) {
-            resolve();
-          } else {
-            requestAnimationFrame(checkBounce);
+        if (this.wasInAnticipation) {
+          // Anticipation reels: smooth deceleration into final position
+          this.isSpinning = false;
+          this.decelerating = true;
+          this.decelIntensity = intensity;
+          this.decelResolve = resolve;
+
+          // Snap the offset to within a few steps of target — the reel will
+          // scroll fast through the remaining filler then slow into the final symbols
+          const remainingDistance = this.targetOffset - this.scrollOffset;
+          const maxDecelDistance = 5 * this.step; // 5 cells of slow-down room
+          if (remainingDistance > maxDecelDistance) {
+            this.scrollOffset = this.targetOffset - maxDecelDistance;
           }
-        };
-        checkBounce();
+
+          // Clear any tarot cardback teasers from the deceleration zone so that
+          // no partial cardback is visible during the slow landing.
+          // The decel zone spans from scrollOffset to targetOffset, which maps to
+          // strip indices around 0..maxDecelCells (filler starts at index `rows`).
+          this.clearTeasersInDecelZone();
+
+          // Start decel at a high speed — the update loop will ease it down
+          this.velocity = 45;
+        } else {
+          // Normal reels: instant stop + bounce (original behavior)
+          this.scrollOffset = this.targetOffset;
+          this.isSpinning = false;
+          this.playLandSound();
+          this.startBounce(intensity);
+
+          const checkBounce = () => {
+            if (!this.bouncing) {
+              resolve();
+            } else {
+              requestAnimationFrame(checkBounce);
+            }
+          };
+          checkBounce();
+        }
+
+        this.wasInAnticipation = false;
       }, delay);
     });
   }
 
   skipToResult(): void {
     // Fast-forward to target position without bounce
-    if (this.isSpinning) {
-      
+    if (this.isSpinning || this.decelerating) {
       this.scrollOffset = this.targetOffset;
       this.isSpinning = false;
+      this.decelerating = false;
       this.bouncing = false;
+      if (this.decelResolve) {
+        this.decelResolve();
+        this.decelResolve = null;
+      }
       this.updateStripPositions();
     }
   }
@@ -165,13 +204,138 @@ export class ReelSpinner extends Container {
     this.bounceTime = 0;
   }
 
+  /**
+   * Enter anticipation mode — slow down the reel and show tarot cardbacks in the strip.
+   * level 1 = first tarot landed (moderate slowdown), level 2 = second tarot (dramatic slowdown)
+   */
+  enterAnticipation(level: number, cardbackIds: string[]): void {
+    this.wasInAnticipation = true;
+    const tarotChance = level === 1 ? 0.08 : 0.12; // chance per group of 3
+
+    // Keep spinning fast — the slowdown happens only during deceleration landing
+    // Just slightly slower than normal to give time to see teasers
+    if (level === 1) {
+      this.velocity = 40;
+    } else {
+      this.velocity = 30;
+    }
+
+    // Inject tarot cardback sprites into the filler portion of the strip
+    // Each tarot teaser spans 3 cells (like real tarot columns), so we process
+    // filler in groups of `this.rows` (3) and make the first sprite tall, hiding the rest
+    const fillerStart = this.rows;
+    const totalColumnHeight = this.rows * this.cellSize + (this.rows - 1) * this.padding;
+
+    for (let i = fillerStart; i + this.rows - 1 < this.strip.length; i += this.rows) {
+      if (Math.random() < tarotChance && cardbackIds.length > 0) {
+        const cardbackId = cardbackIds[Math.floor(Math.random() * cardbackIds.length)];
+        const texture = this.assetLoader.getTexture(cardbackId);
+        if (texture) {
+          // Make the first sprite of the group tall (spanning all 3 rows)
+          this.strip[i].texture = texture;
+          this.strip[i].width = this.cellSize + this.padding;
+          this.strip[i].height = totalColumnHeight;
+          this.strip[i].alpha = 0.7;
+          // Hide the other sprites in this group (covered by the tall one)
+          for (let j = 1; j < this.rows && (i + j) < this.strip.length; j++) {
+            this.strip[i + j].alpha = 0;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Restore filler sprites in the deceleration zone (near the final symbols)
+   * back to normal size so no partial tarot cardback teaser is visible
+   * during the slow landing animation.
+   */
+  private clearTeasersInDecelZone(): void {
+    // The decel zone is the last few filler cells before the final symbols.
+    // After the snap, scrollOffset is at most 5*step behind targetOffset (0).
+    // The visible area during decel spans strip indices rows..rows+decelCells+rows
+    // (rows = final symbols, then filler starts).
+    // To be safe, clear all filler in the first ~8 cells (more than the 5-cell decel window
+    // plus the 3 visible rows).
+    const safeCells = 10;
+    const fillerStart = this.rows;
+    const fillerEnd = Math.min(fillerStart + safeCells, this.strip.length);
+
+    for (let i = fillerStart; i < fillerEnd; i++) {
+      const sprite = this.strip[i];
+      sprite.width = this.cellSize - 20;
+      sprite.height = this.cellSize - 20;
+      sprite.alpha = 1;
+    }
+  }
+
+  /** Exit anticipation mode — restore filler sprites to normal size */
+  exitAnticipation(): void {
+    this.velocity = this.baseVelocity;
+
+    // Restore any filler sprites that were resized to tall cardback teasers
+    const fillerStart = this.rows;
+    for (let i = fillerStart; i < this.strip.length; i++) {
+      const sprite = this.strip[i];
+      sprite.width = this.cellSize - 20;
+      sprite.height = this.cellSize - 20;
+      sprite.alpha = 1;
+    }
+  }
+
   update(delta: number): void {
     if (this.isSpinning) {
       // Scroll downward: scrollOffset increases from negative toward 0
       this.scrollOffset += this.velocity * delta;
       
+      // Loop scroll: if we've scrolled past all filler, wrap back to the start
+      // so the reel never runs out during long anticipation waits.
+      // The filler starts after the first `rows` final symbols.
+      const fillerLength = (this.strip.length - this.rows) * this.step;
+      if (this.scrollOffset > this.targetOffset) {
+        this.scrollOffset -= fillerLength;
+      }
+      
       this.updateStripPositions();
-    } 
+    }
+    else if (this.decelerating) {
+      // Smooth deceleration: fast scroll then slow ease into final position
+      const remaining = this.targetOffset - this.scrollOffset;
+      const totalDecelDistance = 5 * this.step;
+      // t goes from 1 (far) to 0 (arrived) 
+      const t = Math.min(remaining / totalDecelDistance, 1);
+
+      if (remaining <= 0.5) {
+        // Close enough — snap, land, and bounce
+        this.scrollOffset = this.targetOffset;
+        this.decelerating = false;
+        this.playLandSound();
+        this.startBounce(this.decelIntensity);
+
+        // Wait for bounce to finish then resolve
+        const resolve = this.decelResolve;
+        this.decelResolve = null;
+        if (resolve) {
+          const checkBounce = () => {
+            if (!this.bouncing) {
+              resolve();
+            } else {
+              requestAnimationFrame(checkBounce);
+            }
+          };
+          checkBounce();
+        }
+      } else {
+        // Exponential ease-out: fast at start (t≈1), very slow near end (t≈0)
+        // velocity = minSpeed + (maxSpeed - minSpeed) * t^2
+        const maxSpeed = 50;
+        const minSpeed = 2;
+        const easeVelocity = minSpeed + (maxSpeed - minSpeed) * t * t;
+        this.scrollOffset += easeVelocity * delta;
+      }
+
+      this.updateStripPositions();
+    }
     else if (this.bouncing) {
       // Bounce physics: overshoot down, spring back up
       this.bounceTime += delta;
@@ -266,9 +430,9 @@ export class ReelSpinner extends Container {
     this.updateStripPositions();
   }
 
-  /** Returns true if still scrolling OR bouncing (not fully settled) */
+  /** Returns true if still scrolling, decelerating, OR bouncing (not fully settled) */
   getIsSpinning(): boolean {
-    return this.isSpinning || this.bouncing;
+    return this.isSpinning || this.decelerating || this.bouncing;
   }
   
   /** Returns true only if still scrolling (hasn't been told to stop yet) */

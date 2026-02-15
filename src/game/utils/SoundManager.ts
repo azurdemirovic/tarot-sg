@@ -35,6 +35,7 @@ export class SoundManager {
     'payline-win':        '/assets/sound/payline-win.wav',
     'win-countup':        '/assets/sound/win-countup.wav',
     'anchor-move':        '/assets/sound/anchor-move.wav',
+    'anticipation':       '/assets/sound/anticipation.wav',
   };
 
   async init(): Promise<void> {

@@ -469,7 +469,9 @@ async function handleSpin() {
             spinOutput.feature!, priestessResult,
             () => gameController.generateFreshGrid(),
             (grid, cells) => gameController.applyPriestessSpin(grid, priestessResult, cells),
-            gameController.betAmount
+            gameController.betAmount,
+            (wins) => { soundManager.play('payline-win', 0.4); paylineOverlay.showWinningPaylines(wins, gridView.getReelSpinners()); },
+            () => paylineOverlay.clear()
           );
         }
       );
@@ -483,6 +485,7 @@ async function handleSpin() {
     if (spinOutput.feature && spinOutput.feature.type === 'T_LOVERS' && spinOutput.loversResult) {
       spinBtn.disabled = true;
       loversFeatureActive = true;
+      let loversPayout = 0;
       await runFeature('T_LOVERS',
         () => threeBg?.swapToLovers() ?? Promise.resolve(),
         () => threeBg?.restoreLovers() ?? Promise.resolve(),
@@ -496,7 +499,7 @@ async function handleSpin() {
           const feature = spinOutput.feature!;
           const loversResult = spinOutput.loversResult!;
           let finalGrid = spinOutput.finalGrid;
-          await loversReveal.play(feature, loversResult,
+          loversPayout = await loversReveal.play(feature, loversResult,
             (selectedIndex: number) => {
               const result = gameController.applyLoversSelection(
                 finalGrid, feature, loversResult, selectedIndex
@@ -509,13 +512,20 @@ async function handleSpin() {
               return result;
             },
             () => { finalGrid = gameController.generateFreshGrid(); return finalGrid; },
-            gameController.betAmount
+            gameController.betAmount,
+            () => gameController.generateLoversCandidates(),
+            (wins) => { soundManager.play('payline-win', 0.4); paylineOverlay.showWinningPaylines(wins, gridView.getReelSpinners()); },
+            () => paylineOverlay.clear()
           );
           loversFeatureActive = false;
           await soundManager.stopFeatureMusic(2.0);
           soundManager.restartBgMusic(0.35, 2.0);
         }
       );
+      // Balance was already updated per-spin in applyLoversSpinSelection,
+      // but lastWin should reflect the cumulative total for the UI
+      gameController.lastWin = loversPayout;
+      currentSpinData.totalWin = loversPayout;
     }
 
     if (spinOutput.feature && spinOutput.feature.type === 'T_DEATH' && spinOutput.deathResult) {
@@ -536,7 +546,7 @@ async function handleSpin() {
           currentDeathAnimation = deathReveal;
           deathPayout = await deathReveal.play(
             spinOutput.feature!, deathResult,
-            (cols, rows, stickyWilds) => gameController.generateDeathGrid(cols, rows, stickyWilds),
+            (cols, rows, stickyWilds) => gameController.generateDeathGrid(cols, rows, stickyWilds, deathResult),
             (grid, dr) => gameController.applyDeathSpin(grid, dr),
             gameController.betAmount
           );

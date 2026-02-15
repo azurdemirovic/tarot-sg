@@ -14,6 +14,7 @@
  */
 
 import { Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
+import { SpinCounterUI } from './SpinCounterUI';
 import { AssetLoader } from '../AssetLoader';
 import { FeatureTrigger, Grid, WinLine } from '../Types';
 import { PriestessResult, PriestessSpinResult } from '../logic/TarotFeatureProcessor';
@@ -35,9 +36,9 @@ export class PriestessRevealAnimation {
   private hurryUpRequested: boolean = false;
   /** Whether the reel spin phase is active (hurry-up is allowed) */
   private reelSpinActive: boolean = false;
-  /** Spin counter text overlay */
-  private spinCounterText: Text | null = null;
-  /** Overlay container for spin counter */
+  /** HTML spin counter */
+  private spinCounterUI: SpinCounterUI | null = null;
+  /** Overlay container */
   private overlayContainer: Container;
 
   constructor(
@@ -84,7 +85,9 @@ export class PriestessRevealAnimation {
       totalWin: number;
       multiplier: number;
     },
-    betAmount: number
+    betAmount: number,
+    onShowPaylines?: (wins: WinLine[]) => void,
+    onClearPaylines?: () => void
   ): Promise<number> {
     let totalPayout = 0;
 
@@ -94,8 +97,9 @@ export class PriestessRevealAnimation {
     // Persistent "WON" total display below the frame
     const winTracker = new FeatureWinTracker();
 
-    // Mount overlay for spin counter
+    // Mount overlay container
     this.parent.addChild(this.overlayContainer);
+    this.spinCounterUI = new SpinCounterUI('T_PRIESTESS');
 
     try {
       // ── Phase A: Tear away Priestess tarot columns ──
@@ -108,7 +112,7 @@ export class PriestessRevealAnimation {
         const spinNum = priestessResult.spinsTotal - priestessResult.spinsRemaining + 1;
 
         // Show spin counter
-        await this.showSpinCounter(spinNum, priestessResult.spinsTotal, totalWidth);
+        this.spinCounterUI?.update(spinNum, priestessResult.spinsTotal);
 
         // B1: Generate fresh grid and determine mystery placements BEFORE spinning
         const freshGrid = onGenerateFreshGrid();
@@ -146,7 +150,13 @@ export class PriestessRevealAnimation {
           await winTracker.addWin(totalWin);
         }
 
-        // B8: Show per-spin win using WinDisplay (only if win > 10× bet)
+        // B8: Show payline outlines on winning symbols, then per-spin win display
+        if (wins.length > 0 && totalWin > 0 && onShowPaylines) {
+          onShowPaylines(wins);
+          await wait(800);
+        }
+        if (onClearPaylines) onClearPaylines();
+
         const winDisplay = new WinDisplay(this.parent);
         await winDisplay.show(
           wins,
@@ -167,6 +177,8 @@ export class PriestessRevealAnimation {
       // Total win display is handled by Phase 2.9 in main.ts (outline first, then win screen)
     } finally {
       winTracker.dispose();
+      this.spinCounterUI?.dispose();
+      this.spinCounterUI = null;
       // Final cleanup — restore all reel sprite visibility
       for (let col = 0; col < this.cols; col++) {
         const sprites = this.reelSpinners[col].getVisibleSprites();
@@ -433,35 +445,6 @@ export class PriestessRevealAnimation {
     await Promise.all(flips);
   }
 
-  // ── Spin Counter Display ─────────────────────────────────
-  private async showSpinCounter(spinNum: number, total: number, totalWidth: number): Promise<void> {
-    // Remove any previous counter
-    if (this.spinCounterText) {
-      this.overlayContainer.removeChild(this.spinCounterText);
-      this.spinCounterText.destroy();
-    }
-
-    this.spinCounterText = new Text({
-      text: `MYSTERY SPINS ${spinNum} / ${total}`,
-      style: new TextStyle({
-        fontFamily: 'CustomFont, Arial, sans-serif',
-        fontSize: 22,
-        fill: 0xc084fc,
-        stroke: { color: 0x000000, width: 3 },
-      }),
-    });
-    this.spinCounterText.anchor.set(0.5, 0);
-    this.spinCounterText.x = totalWidth / 2;
-    this.spinCounterText.y = -40;
-    this.overlayContainer.addChild(this.spinCounterText);
-
-    // Brief flash animation
-    await tween(300, (t) => {
-      this.spinCounterText!.alpha = t;
-      this.spinCounterText!.scale.set(0.8 + 0.2 * t);
-    }, easeOutCubic);
-  }
-
   // ── Cleanup ──
   private clearMysteryOverlays(): void {
     for (const [, overlay] of this.mysteryOverlays) {
@@ -471,10 +454,6 @@ export class PriestessRevealAnimation {
   }
 
   private cleanupOverlay(): void {
-    if (this.spinCounterText) {
-      this.spinCounterText.destroy();
-      this.spinCounterText = null;
-    }
     this.overlayContainer.removeChildren();
     this.parent.removeChild(this.overlayContainer);
   }

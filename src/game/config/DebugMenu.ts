@@ -68,6 +68,11 @@ export class DebugMenu {
     this.addToggle(panel, 'Show Paylines', 'SHOW_PAYLINES');
     this.addToggle(panel, 'Death Mode', 'DEATH_MODE');
 
+    // ── Anticipation Testing ──
+    this.addSectionHeader(panel, 'Anticipation Test');
+    this.addToggle(panel, 'Force 2 Tarots', 'FORCE_2_TAROTS');
+    this.addToggle(panel, 'Force 3 Tarots', 'FORCE_3_TAROTS');
+
     // ── Force Features ──
     this.addSectionHeader(panel, 'Force Feature (next spin)');
     this.addForceFeatureDropdown(panel);

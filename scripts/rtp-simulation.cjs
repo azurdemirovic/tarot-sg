@@ -37,17 +37,17 @@ class RNG {
 
 // ─── SYMBOLS ────────────────────────────────────────────────────
 const SYMBOLS = [
-  { id: 'WILD',       tier: 'WILD',    baseWeight: 5 },
-  { id: 'COIN',       tier: 'LOW',     baseWeight: 30 },
-  { id: 'CUP',        tier: 'LOW',     baseWeight: 28 },
-  { id: 'KEY',        tier: 'LOW',     baseWeight: 26 },
-  { id: 'SWORD',      tier: 'LOW',     baseWeight: 28 },
-  { id: 'RING',       tier: 'LOW',     baseWeight: 27 },
-  { id: 'FLEUR',      tier: 'LOW',     baseWeight: 29 },
-  { id: 'SKULLCROSS', tier: 'PREMIUM', baseWeight: 15 },
-  { id: 'DICE',       tier: 'PREMIUM', baseWeight: 12 },
-  { id: 'KING',       tier: 'PREMIUM', baseWeight: 10 },
-  { id: 'ANGEL',      tier: 'PREMIUM', baseWeight: 8 },
+  { id: 'WILD',       tier: 'WILD',    baseWeight: 3 },
+  { id: 'COIN',       tier: 'LOW',     baseWeight: 35 },
+  { id: 'CUP',        tier: 'LOW',     baseWeight: 33 },
+  { id: 'KEY',        tier: 'LOW',     baseWeight: 31 },
+  { id: 'SWORD',      tier: 'LOW',     baseWeight: 33 },
+  { id: 'RING',       tier: 'LOW',     baseWeight: 32 },
+  { id: 'FLEUR',      tier: 'LOW',     baseWeight: 34 },
+  { id: 'SKULLCROSS', tier: 'PREMIUM', baseWeight: 10 },
+  { id: 'DICE',       tier: 'PREMIUM', baseWeight: 8 },
+  { id: 'KING',       tier: 'PREMIUM', baseWeight: 6 },
+  { id: 'ANGEL',      tier: 'PREMIUM', baseWeight: 5 },
 ];
 const NORMAL_SYMBOLS = SYMBOLS; // excludes MALE, FEMALE, tarots
 const NORMAL_WEIGHTS = NORMAL_SYMBOLS.map(s => s.baseWeight);
@@ -56,11 +56,11 @@ const PREMIUM_POOL = SYMBOLS.filter(s => s.tier === 'PREMIUM');
 const LOW_POOL = SYMBOLS.filter(s => s.tier === 'LOW');
 
 const TAROT_SYMBOLS = [
-  { id: 'T_FOOL',      baseWeight: 30 },
-  { id: 'T_CUPS',      baseWeight: 30 },
-  { id: 'T_LOVERS',    baseWeight: 20 },
-  { id: 'T_PRIESTESS', baseWeight: 10 },
-  { id: 'T_DEATH',     baseWeight: 10 },
+  { id: 'T_FOOL',      baseWeight: 45 },
+  { id: 'T_CUPS',      baseWeight: 25 },
+  { id: 'T_LOVERS',    baseWeight: 14 },
+  { id: 'T_PRIESTESS', baseWeight: 9 },
+  { id: 'T_DEATH',     baseWeight: 5 },
 ];
 const TAROT_WEIGHTS = TAROT_SYMBOLS.map(s => s.baseWeight);
 
@@ -71,12 +71,12 @@ const PAYTABLE = {
   KING:       { 3: 38,  4: 130, 5: 500 },
   DICE:       { 3: 28,  4: 75,  5: 375 },
   SKULLCROSS: { 3: 18,  4: 55,  5: 225 },
-  FLEUR:      { 3: 15,  4: 45,  5: 185 },
-  RING:       { 3: 12,  4: 38,  5: 150 },
-  SWORD:      { 3: 12,  4: 38,  5: 150 },
-  KEY:        { 3: 10,  4: 30,  5: 110 },
-  CUP:        { 3: 10,  4: 24,  5: 95 },
-  COIN:       { 3: 10,  4: 24,  5: 95 },
+  FLEUR:      { 3: 8,   4: 20,  5: 80 },
+  RING:       { 3: 6,   4: 16,  5: 65 },
+  SWORD:      { 3: 6,   4: 16,  5: 65 },
+  KEY:        { 3: 5,   4: 14,  5: 55 },
+  CUP:        { 3: 5,   4: 12,  5: 45 },
+  COIN:       { 3: 5,   4: 12,  5: 45 },
   T_FOOL:     { 3: 25,  4: 60,  5: 160 },
   T_CUPS:     { 3: 25,  4: 60,  5: 160 },
   T_LOVERS:   { 3: 30,  4: 80,  5: 200 },
@@ -100,7 +100,7 @@ const PAYLINES = [
 // ─── CONSTANTS ──────────────────────────────────────────────────
 const BET = 0.20;
 const BET_PER_LINE = BET / 25;
-const TAROT_CHANCE = 0.071;
+const TAROT_CHANCE = 0.18;
 const COLS = 5;
 const ROWS = 3;
 
@@ -163,8 +163,8 @@ function generateSpin(rng) {
   if (hasTarots) {
     const roll = rng.nextFloat();
     let tarotCount = 1;
-    if (roll > 0.20 && roll <= 0.70) tarotCount = 2;
-    else if (roll > 0.70) tarotCount = 3;
+    if (roll > 0.60 && roll <= 0.92) tarotCount = 2;
+    else if (roll > 0.92) tarotCount = 3;
 
     const avail = [0, 1, 2, 3, 4];
     rng.shuffle(avail);
@@ -215,17 +215,19 @@ function applyFool(rng, grid, trigger) {
   const perColWilds = [];
   for (let i = 0; i < trigger.columns.length; i++) {
     if (trigger.count === 2) {
-      perColWilds.push(rng.nextInt(1, 3));
+      // 2 Fools: 1 wild per col (70%), 2 wilds (30%)
+      perColWilds.push(rng.nextFloat() < 0.70 ? 1 : 2);
     } else {
+      // 3+ Fools: 1 wild (40%), 2 wilds (40%), 3 wilds (20%)
       const roll = rng.nextFloat();
-      if (roll < 0.20) perColWilds.push(1);
-      else if (roll < 0.60) perColWilds.push(2);
+      if (roll < 0.40) perColWilds.push(1);
+      else if (roll < 0.80) perColWilds.push(2);
       else perColWilds.push(3);
     }
   }
   let totalWilds = perColWilds.reduce((s, v) => s + v, 0);
-  if (totalWilds > 9) {
-    let excess = totalWilds - 9;
+  if (totalWilds > 6) {
+    let excess = totalWilds - 6;
     for (let i = perColWilds.length - 1; i >= 0 && excess > 0; i--) {
       const reduce = Math.min(excess, perColWilds[i] - 1);
       perColWilds[i] -= reduce;
@@ -245,18 +247,19 @@ function applyFool(rng, grid, trigger) {
       }
     }
   });
-  return trigger.count >= 3 ? 5 : 3;
+  // Modest multipliers: 2 Fools = ×2, 3+ Fools = ×3
+  return trigger.count >= 3 ? 3 : 2;
 }
 
 // ─── CUPS FEATURE ───────────────────────────────────────────────
 // Cups payout = sum of all multiplier cell values × betAmount (no paylines)
 function applyCups(rng, grid, trigger) {
-  const pool2 = [2, 3];
-  const pool3 = [3, 5, 10];
+  const pool2 = [3, 5, 8];
+  const pool3 = [5, 10, 15, 25];
   let totalMultiplierSum = 0;
 
   trigger.columns.forEach((col) => {
-    const mCount = trigger.count === 2 ? rng.nextInt(1, 2) : rng.nextInt(2, 3);
+    const mCount = trigger.count === 2 ? rng.nextInt(1, 3) : rng.nextInt(2, 3);
     const pool = trigger.count === 2 ? pool2 : pool3;
     for (let i = 0; i < mCount; i++) {
       totalMultiplierSum += rng.choice(pool);
@@ -286,17 +289,17 @@ function applyLovers(rng, trigger) {
     }
     const bondSymbol = candidates[0]; // Simulate player always picking first
 
-    // Roll area size (rebalanced — biased toward smaller areas)
+    // Roll area size — slightly larger areas for better payline coverage
     const areaRoll = rng.nextFloat();
     let tw, th;
-    if (areaRoll < 0.15) { tw = 1; th = 1; }
-    else if (areaRoll < 0.40) {
+    if (areaRoll < 0.08) { tw = 1; th = 1; }
+    else if (areaRoll < 0.25) {
       if (rng.nextFloat() < 0.5) { tw = 2; th = 1; } else { tw = 1; th = 2; }
-    } else if (areaRoll < 0.70) {
+    } else if (areaRoll < 0.55) {
       if (rng.nextFloat() < 0.5) { tw = 2; th = 2; } else { tw = 3; th = 1; }
-    } else if (areaRoll < 0.88) {
+    } else if (areaRoll < 0.78) {
       if (rng.nextFloat() < 0.5) { tw = 3; th = 2; } else { tw = 2; th = 3; }
-    } else if (areaRoll < 0.97) {
+    } else if (areaRoll < 0.93) {
       if (rng.nextFloat() < 0.5) { tw = 4; th = 2; } else { tw = 3; th = 3; }
     } else {
       if (rng.nextFloat() < 0.5) { tw = 5; th = 2; } else { tw = 4; th = 3; }
@@ -330,12 +333,13 @@ function applyPriestess(rng, trigger) {
     // Generate fresh grid
     const grid = generateGrid(rng, COLS, ROWS);
 
-    // Roll new mystery cell count
+    // Roll new mystery cell count — more generous for bigger board coverage
     const countRoll = rng.nextFloat();
     let coverCount;
-    if (countRoll < 0.70) coverCount = 1;
-    else if (countRoll < 0.92) coverCount = 2;
-    else coverCount = 3;
+    if (countRoll < 0.30) coverCount = 1;
+    else if (countRoll < 0.65) coverCount = 2;
+    else if (countRoll < 0.90) coverCount = 3;
+    else coverCount = 4;
 
     // Find available cells
     const occupiedSet = new Set(mysteryCells.map(c => `${c[0]},${c[1]}`));
@@ -438,11 +442,11 @@ function clusterPayout(symbolId, size, betAmount) {
   const tier = getTier(symbolId);
   let mult;
   if (tier === 'PREMIUM') {
-    if (size >= 6) mult = 30; else if (size === 5) mult = 15; else if (size === 4) mult = 5; else mult = 1;
+    if (size >= 6) mult = 40; else if (size === 5) mult = 20; else if (size === 4) mult = 8; else mult = 2;
   } else if (tier === 'WILD') {
-    if (size >= 6) mult = 50; else if (size === 5) mult = 25; else if (size === 4) mult = 10; else mult = 2;
+    if (size >= 6) mult = 60; else if (size === 5) mult = 30; else if (size === 4) mult = 12; else mult = 3;
   } else {
-    if (size >= 6) mult = 10; else if (size === 5) mult = 5; else if (size === 4) mult = 2; else mult = 0.5;
+    if (size >= 6) mult = 15; else if (size === 5) mult = 8; else if (size === 4) mult = 3; else mult = 0.8;
   }
   return mult * betAmount;
 }
@@ -457,8 +461,14 @@ function applyDeath(rng, trigger) {
   let stickyWilds = new Set();
   let totalWin = 0;
 
+  // Death uses a reduced symbol pool (5 symbols + WILD) to create more clusters
+  const DEATH_POOL_SIZE = 5;
+  const deathPool = rng.shuffle([...NORMAL_SYMBOLS].filter(s => s.id !== 'WILD')).slice(0, DEATH_POOL_SIZE);
+  deathPool.push(SYMBOLS.find(s => s.id === 'WILD'));
+  const deathWeights = deathPool.map(s => s.id === 'WILD' ? 10 : s.baseWeight);
+
   while (spinsRemaining > 0) {
-    // Generate grid
+    // Generate grid with reduced symbol pool for clustering
     const grid = [];
     for (let c = 0; c < gridCols; c++) {
       grid[c] = [];
@@ -467,7 +477,7 @@ function applyDeath(rng, trigger) {
         if (stickyWilds.has(k)) {
           grid[c][r] = 'WILD';
         } else {
-          grid[c][r] = rng.weightedChoice(NORMAL_SYMBOLS, NORMAL_WEIGHTS).id;
+          grid[c][r] = rng.weightedChoice(deathPool, deathWeights).id;
         }
       }
     }
@@ -485,9 +495,9 @@ function applyDeath(rng, trigger) {
       if (stickyWilds.has(k)) stickyWilds.delete(k);
     }
 
-    // Refill slashed cells — 15% chance sticky WILD
+    // Refill slashed cells — 20% chance sticky WILD
     for (const k of slashedSet) {
-      if (rng.nextFloat() < 0.15) {
+      if (rng.nextFloat() < 0.20) {
         stickyWilds.add(k);
       }
     }

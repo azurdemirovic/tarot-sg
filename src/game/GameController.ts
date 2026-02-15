@@ -4,6 +4,7 @@ import { SpinGenerator } from './logic/SpinGenerator';
 import { PaylineEvaluator } from './logic/PaylineEvaluator';
 import { TarotFeatureProcessor, FoolResult, CupsResult, LoversResult, LoversSpinResult, PriestessResult, PriestessSpinResult, DeathResult, DeathSpinResult } from './logic/TarotFeatureProcessor';
 import { Grid, TarotColumn, FeatureTrigger, GameMode, WinLine } from './Types';
+import { DEBUG } from './config/debug';
 
 export interface SpinOutput {
   /** The initial grid as landed (before feature transformation) */
@@ -73,7 +74,11 @@ export class GameController {
     this.paylineEvaluator.currentBetAmount = this.betAmount;
 
     // ── Phase 1: generate raw grid (with possible tarot columns) ──
-    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.071);
+    // Check debug flags for forced tarot count
+    let forceTarotCount: number | undefined;
+    if (DEBUG.FORCE_3_TAROTS) forceTarotCount = 3;
+    else if (DEBUG.FORCE_2_TAROTS) forceTarotCount = 2;
+    const { grid: initialGrid, tarotColumns } = this.spinGenerator.generateSpin(5, 3, 0.18, forceTarotCount);
     this.currentGrid = initialGrid;
     this.lastTarotColumns = tarotColumns;
 
@@ -364,8 +369,16 @@ export class GameController {
    * Sticky WILD positions use 'EMPTY' so no symbol drops behind the overlay;
    * the visual WILD is rendered by the sticky overlay in DeathRevealAnimation.
    */
-  generateDeathGrid(cols: number, rows: number, stickyWilds: { col: number; row: number }[] = []): Grid {
-    const { grid } = this.spinGenerator.generateSpin(cols, rows, 0); // 0 tarot chance
+  generateDeathGrid(cols: number, rows: number, stickyWilds: { col: number; row: number }[] = [], deathResult?: DeathResult): Grid {
+    let grid: Grid;
+
+    if (deathResult?.deathPool && deathResult?.deathWeights) {
+      // Use reduced symbol pool for more clustering
+      grid = this.featureProcessor.generateDeathGrid(deathResult);
+    } else {
+      const result = this.spinGenerator.generateSpin(cols, rows, 0);
+      grid = result.grid;
+    }
 
     // Mark sticky WILD positions as EMPTY — the overlay sprite handles the visual
     for (const wild of stickyWilds) {

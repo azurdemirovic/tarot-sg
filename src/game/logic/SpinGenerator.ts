@@ -12,23 +12,28 @@ export class SpinGenerator {
    * Generates a spin result for a 5x3 grid
    * @param tarotChance Probability (0-1) of tarots appearing
    */
-  generateSpin(cols: number = 5, rows: number = 3, tarotChance: number = 0 /* disabled for base game */): { grid: Grid, tarotColumns: TarotColumn[] } {
+  generateSpin(cols: number = 5, rows: number = 3, tarotChance: number = 0.18, forceTarotCount?: number): { grid: Grid, tarotColumns: TarotColumn[] } {
     const grid: Grid = [];
     const tarotColumns: TarotColumn[] = [];
 
     // Determine if tarots will appear
-    const hasTarots = this.rng.nextFloat() < tarotChance;
+    const hasTarots = forceTarotCount ? true : this.rng.nextFloat() < tarotChance;
     let tarotColumnIndices: number[] = [];
     let tarotTypes: string[] = [];
 
     if (hasTarots) {
-      // Determine how many tarot columns (testing bias: 1=20%, 2=50%, 3=30%)
-      const tarotCountRoll = this.rng.nextFloat();
-      let tarotCount = 1;
-      if (tarotCountRoll > 0.20 && tarotCountRoll <= 0.70) {
-        tarotCount = 2;
-      } else if (tarotCountRoll > 0.70) {
-        tarotCount = 3;
+      // Determine how many tarot columns (1=60% teaser, 2=32% trigger, 3=8% rare trigger)
+      let tarotCount: number;
+      if (forceTarotCount) {
+        tarotCount = forceTarotCount;
+      } else {
+        const tarotCountRoll = this.rng.nextFloat();
+        tarotCount = 1;
+        if (tarotCountRoll > 0.60 && tarotCountRoll <= 0.92) {
+          tarotCount = 2;
+        } else if (tarotCountRoll > 0.92) {
+          tarotCount = 3;
+        }
       }
 
       // Select random columns for tarots
