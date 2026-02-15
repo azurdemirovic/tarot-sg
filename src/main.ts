@@ -228,7 +228,6 @@ let currentSpinData: SpinOutput | null = null;
 let skipEnableTimer: ReturnType<typeof setTimeout> | null = null;
 let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
 const SAFETY_TIMEOUT_MS = 10000;
-let hasSpunOnce: boolean = false; // Track if any spin has happened
 let featureSoundPlayed: boolean = false; // Prevent double-fire of feature trigger sound
 let foolFeatureActive: boolean = false; // Track if Fool feature is currently running
 let cupsFeatureActive: boolean = false; // Track if Cups feature is currently running
@@ -341,7 +340,6 @@ async function handleSpin() {
   } else {
     spinOutput = gameController.spin();
   }
-  hasSpunOnce = true;
   currentSpinData = spinOutput;
 
   // After 0.25s, unlock button for hurry-up (but not during features or title card)
