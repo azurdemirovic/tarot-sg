@@ -96,17 +96,14 @@ async function init() {
         });
         console.log('✅ Three.js 3D background initialized (models loading in parallel)');
 
-        // Track 3D model loading progress (40%–100% of loading bar)
-        threeBg.onModelProgress = (progress) => {
-          setBarProgress(40 + progress * 60);
-        };
+        // 3D models load in background — no loading bar tracking needed
       }
     }
 
-    // Load PixiJS assets with progress (textures = first 40%)
+    // Load PixiJS assets with progress (textures fill the loading bar)
     assetLoader = new AssetLoader();
     await assetLoader.load((progress) => {
-      setBarProgress(progress * 40);
+      setBarProgress(progress * 90); // leave 10% for sounds
     });
 
     console.log('✅ Assets loaded');
@@ -183,20 +180,31 @@ async function init() {
     window.addEventListener('click', startBgMusic);
     window.addEventListener('keydown', startBgMusic);
 
-    // ── Wait for main 3D model AND sounds before dismissing loading screen ──
-    await soundsReady; // sounds in parallel with model loading
-    if (threeBg) {
-      await threeBg.mainModelReady;
-      loadingBar.style.width = '100%';
-      console.log('✅ Main 3D model loaded — feature models loading in background');
+    // ── Wait only for sounds, then dismiss loading screen ──
+    await soundsReady;
+    setBarProgress(100);
 
-      // Death debug mode: activate Death visual state persistently
-      if (DEBUG.DEATH_MODE) {
-        threeBg.setFeatureColor('T_DEATH');
-        threeBg.swapToDeath().then(() => {
-          console.log('💀 DEBUG: Death mode visuals activated (3D model + color tint)');
-        });
-      }
+    // 3D models continue loading in background — fade in when ready
+    if (threeBg) {
+      // Hide the Three.js canvas until main model is ready, then fade it in
+      const threeCanvas = document.getElementById('three-canvas') as HTMLCanvasElement;
+      if (threeCanvas) threeCanvas.style.opacity = '0';
+
+      threeBg.mainModelReady.then(() => {
+        console.log('✅ Main 3D model loaded — fading in background');
+        if (threeCanvas) {
+          threeCanvas.style.transition = 'opacity 1s ease-in';
+          threeCanvas.style.opacity = '1';
+        }
+
+        // Death debug mode: activate Death visual state persistently
+        if (DEBUG.DEATH_MODE) {
+          threeBg!.setFeatureColor('T_DEATH');
+          threeBg!.swapToDeath().then(() => {
+            console.log('💀 DEBUG: Death mode visuals activated (3D model + color tint)');
+          });
+        }
+      });
     }
 
     // ── Hide loading screen with fade-out ──
